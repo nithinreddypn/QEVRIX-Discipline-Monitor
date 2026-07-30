@@ -1,0 +1,9 @@
+project_id = "jrioxyykeqvmcnhitsta"
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.gmail.com"
+port = 587
+user = "global.iseservice@gmail.com"
+pass = "ufvt affl cdwh alpl"
+admin_email = "global.iseservice@gmail.com"
