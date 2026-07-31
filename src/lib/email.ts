@@ -1,5 +1,82 @@
 import { createServerFn } from "@tanstack/react-start";
 
+type ServerRole = "student" | "teacher" | "admin";
+type Caller = { userId: string; roles: ServerRole[] };
+
+function getServerConfig() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseAnonKey =
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error("Server configuration incomplete.");
+  }
+
+  return { supabaseUrl, supabaseServiceKey, supabaseAnonKey };
+}
+
+async function createAdminClient() {
+  const { createClient } = await import("@supabase/supabase-js");
+  const { supabaseUrl, supabaseServiceKey, supabaseAnonKey } = getServerConfig();
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { apikey: supabaseAnonKey } },
+  });
+}
+
+async function getCaller(supabaseAdmin: Awaited<ReturnType<typeof createAdminClient>>): Promise<Caller> {
+  const { getRequest } = await import("@tanstack/react-start/server");
+  const request = getRequest();
+  const authHeader = request?.headers.get("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
+
+  if (!token) throw new Error("Unauthorized.");
+
+  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+  const userId = userData.user?.id;
+  if (userError || !userId) throw new Error("Unauthorized.");
+
+  const { data: roleRows, error: roleError } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+
+  if (roleError) throw roleError;
+  return { userId, roles: (roleRows ?? []).map((row) => row.role as ServerRole) };
+}
+
+function hasAnyRole(caller: Caller, allowed: ServerRole[]) {
+  return caller.roles.some((role) => allowed.includes(role));
+}
+
+async function requireRole(
+  supabaseAdmin: Awaited<ReturnType<typeof createAdminClient>>,
+  allowed: ServerRole[],
+) {
+  const caller = await getCaller(supabaseAdmin);
+  if (!hasAnyRole(caller, allowed)) throw new Error("Forbidden.");
+  return caller;
+}
+
+async function assertCanDecideStudent(
+  supabaseAdmin: Awaited<ReturnType<typeof createAdminClient>>,
+  caller: Caller,
+  studentId: string,
+) {
+  if (caller.roles.includes("admin")) return;
+  if (!caller.roles.includes("teacher")) throw new Error("Forbidden.");
+
+  const [{ data: teacher }, { data: student }] = await Promise.all([
+    supabaseAdmin.from("teachers").select("branch_id").eq("user_id", caller.userId).maybeSingle(),
+    supabaseAdmin.from("students").select("branch_id").eq("id", studentId).maybeSingle(),
+  ]);
+
+  if (!teacher?.branch_id || !student?.branch_id || teacher.branch_id !== student.branch_id) {
+    throw new Error("Forbidden.");
+  }
+}
+
 export const sendRecoveryEmail = createServerFn({ method: "POST" })
   .validator((data: { email: string; redirectTo: string }) => {
     if (!data.email || typeof data.email !== "string") {
@@ -74,7 +151,7 @@ export const sendRecoveryEmail = createServerFn({ method: "POST" })
 
     // 5. Send recovery email
     const mailOptions = {
-      from: process.env.SMTP_FROM || `"Qevrix Discipline Monitor"`,
+      from: process.env.SMTP_FROM || (process.env.SMTP_USER ? `"Qevrix Discipline Monitor" <${process.env.SMTP_USER}>` : `"Qevrix Discipline Monitor"`),
       to: email,
       subject: "Reset Your Password - QEVRIX",
       html: `
@@ -119,20 +196,8 @@ export const notifyTeacherNewStudent = createServerFn({ method: "POST" })
     return data;
   })
   .handler(async ({ data: { studentId } }) => {
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("[Email Server] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-      throw new Error("Server configuration incomplete.");
-    }
-
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-      global: { headers: { apikey: supabaseAnonKey } },
-    });
+    const supabaseAdmin = await createAdminClient();
+    const caller = await requireRole(supabaseAdmin, ["student", "teacher", "admin"]);
 
     // 1. Get the student details (include approval_email_sent check here, server-side)
     const { data: student, error: studentError } = await supabaseAdmin
@@ -144,6 +209,20 @@ export const notifyTeacherNewStudent = createServerFn({ method: "POST" })
     if (studentError || !student) {
       console.error("[Email Server] Error fetching student details:", studentError);
       throw new Error("Student not found.");
+    }
+
+    if (!caller.roles.includes("admin") && !caller.roles.includes("teacher")) {
+      const { data: ownStudent } = await supabaseAdmin
+        .from("students")
+        .select("id")
+        .eq("id", studentId)
+        .eq("user_id", caller.userId)
+        .maybeSingle();
+      if (!ownStudent) throw new Error("Forbidden.");
+    }
+
+    if (caller.roles.includes("teacher") && !caller.roles.includes("admin")) {
+      await assertCanDecideStudent(supabaseAdmin, caller, studentId);
     }
 
     // Guard: don't re-send if already sent
@@ -202,7 +281,7 @@ export const notifyTeacherNewStudent = createServerFn({ method: "POST" })
     // Send notification email to each teacher
     for (const teacher of activeTeachers) {
       const mailOptions = {
-        from: process.env.SMTP_FROM || `"Qevrix Discipline Monitor"`,
+        from: process.env.SMTP_FROM || (process.env.SMTP_USER ? `"Qevrix Discipline Monitor" <${process.env.SMTP_USER}>` : `"Qevrix Discipline Monitor"`),
         to: teacher.email,
         subject: "New Student Signup Awaiting Approval - QEVRIX",
         html: `
@@ -405,7 +484,7 @@ export const decideStudentApproval = createServerFn({ method: "POST" })
 
       try {
         await transporter.sendMail({
-          from: process.env.SMTP_FROM || `"Qevrix Discipline Monitor"`,
+          from: process.env.SMTP_FROM || (process.env.SMTP_USER ? `"Qevrix Discipline Monitor" <${process.env.SMTP_USER}>` : `"Qevrix Discipline Monitor"`),
           to: student.email,
           subject: subject,
           html: mailHtml,
