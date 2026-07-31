@@ -13,6 +13,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { usePhotoUrl } from "@/lib/photo";
+import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/_authenticated/detections/$id")({
   head: () => ({
@@ -50,6 +51,8 @@ type DetectionRow = {
 
 function DetectionDetailsPage() {
   const { id } = Route.useParams();
+  const { roles: userRoles } = useAuth();
+  const isAdmin = userRoles.includes("admin");
 
   const detection = useQuery({
     queryKey: ["detection", id],
@@ -269,13 +272,23 @@ function DetectionDetailsPage() {
 
       {d.students?.id && (
         <div className="flex justify-end">
-          <Link
-            to="/teacher/students/$id"
-            params={{ id: d.students.id }}
-            className="btn-ghost text-sm"
-          >
-            View student profile
-          </Link>
+          {isAdmin ? (
+            <Link
+              to="/admin/students/$id"
+              params={{ id: d.students.id }}
+              className="btn-ghost text-sm"
+            >
+              View student profile
+            </Link>
+          ) : (
+            <Link
+              to="/teacher/students/$id"
+              params={{ id: d.students.id }}
+              className="btn-ghost text-sm"
+            >
+              View student profile
+            </Link>
+          )}
         </div>
       )}
     </div>
