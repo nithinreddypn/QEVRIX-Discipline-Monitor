@@ -78,6 +78,14 @@ function DetectionsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
+  const todayString = useMemo(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
   const branches = useQuery({
     queryKey: ["branches-lite"],
     queryFn: async (): Promise<Branch[]> => {
@@ -185,8 +193,27 @@ function DetectionsPage() {
             <option value="no">ID: missing</option>
           </select>
           <div className="flex gap-2">
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={selectCls + " w-full"} />
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={selectCls + " w-full"} />
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFrom(val);
+                if (to && to < val) {
+                  setTo(val);
+                }
+              }}
+              max={todayString}
+              className={selectCls + " w-full"}
+            />
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              min={from || undefined}
+              max={todayString}
+              className={selectCls + " w-full"}
+            />
           </div>
         </div>
       </div>

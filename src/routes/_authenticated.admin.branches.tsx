@@ -156,7 +156,7 @@ function BranchesPage() {
         </button>
       </header>
 
-      <div className="card-surface overflow-hidden p-0">
+      <div className="card-surface overflow-x-auto p-0">
         <table className="min-w-full divide-y divide-border text-sm">
           <thead className="bg-secondary/40">
             <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

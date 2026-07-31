@@ -74,6 +74,14 @@ function TeacherRecordsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
+  const todayString = useMemo(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
   const records = useQuery({
     queryKey: ["teacher-records", user?.id],
     enabled: !!user,
@@ -141,13 +149,22 @@ function TeacherRecordsPage() {
           <input
             type="date"
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setFrom(val);
+              if (to && to < val) {
+                setTo(val);
+              }
+            }}
+            max={todayString}
             className="rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
           <input
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
+            min={from || undefined}
+            max={todayString}
             className="rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
           <select

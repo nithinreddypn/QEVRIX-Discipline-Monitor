@@ -132,7 +132,7 @@ export function AppSidebar() {
   const primaryRole =
     roles.includes("admin") ? "admin" :
     roles.includes("teacher") ? "teacher" : "student";
-  const { state } = useSidebar();
+  const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
 
   const studentGroups = useStudentGroups();
@@ -197,7 +197,7 @@ export function AppSidebar() {
                             : "text-foreground/80 hover:bg-sidebar-accent hover:text-foreground",
                         ].join(" ")}
                       >
-                        <Link to={item.to}>
+                        <Link to={item.to} onClick={() => { if (isMobile) setOpenMobile(false); }}>
                           {active && (
                             <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
                           )}
@@ -246,10 +246,10 @@ export function AppSidebar() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link to="/settings"><Settings className="mr-2 h-4 w-4" /> Settings</Link>
+              <Link to="/settings" onClick={() => { if (isMobile) setOpenMobile(false); }}><Settings className="mr-2 h-4 w-4" /> Settings</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link to="/preferences"><Sliders className="mr-2 h-4 w-4" /> Preferences</Link>
+              <Link to="/preferences" onClick={() => { if (isMobile) setOpenMobile(false); }}><Sliders className="mr-2 h-4 w-4" /> Preferences</Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={handleSignOut}>
