@@ -137,7 +137,7 @@ function ReportsPage() {
               const h = Math.round((b.count / maxCount) * 100);
               return (
                 <div key={i} className="flex flex-1 flex-col items-center gap-2">
-                  <div className="flex w-full flex-1 items-end">
+                  <div className="flex w-full h-36 items-end">
                     <div
                       className="w-full rounded-t-md bg-primary/80 transition-all hover:bg-primary"
                       style={{ height: `${Math.max(h, 2)}%` }}

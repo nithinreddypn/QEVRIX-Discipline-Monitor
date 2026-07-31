@@ -160,13 +160,12 @@ function TrendBars({ data }: { data: { label: string; count: number }[] }) {
   return (
     <div className="flex h-48 items-end gap-[3px]">
       {data.map((d, i) => (
-        <div key={i} className="group relative flex flex-1 flex-col items-center">
-          <div
-            className="w-full rounded-t-sm bg-primary/80 transition-colors hover:bg-primary"
-            style={{ height: `${(d.count / max) * 100}%` }}
-            title={`${d.label}: ${d.count}`}
-          />
-        </div>
+        <div
+          key={i}
+          className="flex-1 rounded-t-sm bg-primary/80 transition-colors hover:bg-primary"
+          style={{ height: `${(d.count / max) * 100}%` }}
+          title={`${d.label}: ${d.count}`}
+        />
       ))}
     </div>
   );
@@ -199,13 +198,12 @@ function HourBars({ data }: { data: { label: string; count: number; h: number }[
     <div>
       <div className="flex h-40 items-end gap-[2px]">
         {data.map((d) => (
-          <div key={d.h} className="flex-1">
-            <div
-              className="w-full rounded-t-sm bg-primary/80"
-              style={{ height: `${(d.count / max) * 100}%` }}
-              title={`${d.label}: ${d.count}`}
-            />
-          </div>
+          <div
+            key={d.h}
+            className="flex-1 rounded-t-sm bg-primary/80"
+            style={{ height: `${(d.count / max) * 100}%` }}
+            title={`${d.label}: ${d.count}`}
+          />
         ))}
       </div>
       <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
