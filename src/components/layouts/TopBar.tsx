@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useTheme } from "@/lib/theme";
 import { roleHome } from "@/lib/roles";
 import type { AppRole } from "@/lib/auth-context";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 function crumbs(pathname: string): { label: string }[] {
   const parts = pathname.split("/").filter(Boolean);
@@ -44,23 +45,26 @@ export function TopBar() {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border bg-card/80 px-6 backdrop-blur">
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px]">
-        {trail.map((c, i) => {
-          const isLast = i === trail.length - 1;
-          return (
-            <span key={i} className="flex items-center gap-1.5">
-              {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />}
-              {isLast ? (
-                <span className="font-semibold text-foreground">{c.label}</span>
-              ) : (
-                <Link to={home} className="font-medium text-muted-foreground transition-colors hover:text-foreground">
-                  {c.label}
-                </Link>
-              )}
-            </span>
-          );
-        })}
-      </nav>
+      <div className="flex items-center gap-2 min-w-0">
+        <SidebarTrigger className="-ml-1" />
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px]">
+          {trail.map((c, i) => {
+            const isLast = i === trail.length - 1;
+            return (
+              <span key={i} className="flex items-center gap-1.5">
+                {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />}
+                {isLast ? (
+                  <span className="font-semibold text-foreground">{c.label}</span>
+                ) : (
+                  <Link to={home} className="font-medium text-muted-foreground transition-colors hover:text-foreground">
+                    {c.label}
+                  </Link>
+                )}
+              </span>
+            );
+          })}
+        </nav>
+      </div>
 
       <div className="flex items-center gap-1">
         <Link

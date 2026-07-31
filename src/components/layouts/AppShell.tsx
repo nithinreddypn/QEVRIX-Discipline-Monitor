@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { LogOut, ShieldCheck, User as UserIcon } from "lucide-react";
+import { LogOut, Menu, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -81,6 +81,7 @@ export function MarketingShell({
   transparentTop?: boolean;
 }) {
   const [scrolled, setScrolled] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (!transparentTop) return;
@@ -150,18 +151,55 @@ export function MarketingShell({
               </Link>
             ))}
           </nav>
-          <Link
-            to="/login"
-            className={
-              overlay
-                ? "inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-[0_1px_2px_rgb(34_197_94/0.25),0_6px_16px_-4px_rgb(34_197_94/0.35)] transition hover:brightness-110"
-                : "btn-primary text-sm"
-            }
-          >
-            Login
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/login"
+              className={
+                overlay
+                  ? "inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-[0_1px_2px_rgb(34_197_94/0.25),0_6px_16px_-4px_rgb(34_197_94/0.35)] transition hover:brightness-110"
+                  : "btn-primary text-sm"
+              }
+            >
+              Login
+            </Link>
+            <button
+              onClick={() => setMobileOpen(!mobileOpen)}
+              className={[
+                "grid h-9 w-9 place-items-center rounded-md md:hidden transition-colors",
+                overlay
+                  ? "text-white/80 hover:text-white hover:bg-white/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+              ].join(" ")}
+              aria-label="Toggle menu"
+            >
+              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
         </div>
       </header>
+      
+      {/* Mobile Menu Dropdown Drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-x-0 top-16 z-30 border-b border-border bg-background/95 p-6 backdrop-blur-md md:hidden">
+          <nav className="flex flex-col gap-4">
+            {MARKETING_LINKS.map((l) => (
+              <Link
+                key={l.to}
+                to={l.to}
+                onClick={() => setMobileOpen(false)}
+                activeOptions={{ exact: l.to === "/" }}
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                activeProps={{
+                  className: "text-primary font-semibold",
+                }}
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      )}
+
       {/* Spacer for non-overlay pages so content isn't hidden under fixed nav */}
       {!transparentTop && <div className="h-16" aria-hidden />}
       {children}
