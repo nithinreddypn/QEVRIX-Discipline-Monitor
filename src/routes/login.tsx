@@ -39,6 +39,12 @@ function LoginPage() {
     }
     const uid = data.user?.id;
     const role = uid ? await fetchPrimaryRole(uid) : "student";
+    if (role === "student") {
+      await supabase.auth.signOut();
+      setLoading(false);
+      toast.error("Student login is disabled. Access is only allowed for Admin and Teacher roles.");
+      return;
+    }
     setLoading(false);
     toast.success("Signed in");
     navigate({ to: roleHome(role), replace: true });

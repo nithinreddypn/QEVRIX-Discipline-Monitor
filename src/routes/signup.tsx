@@ -39,7 +39,7 @@ type Role = "student" | "teacher";
 
 function SignupPage() {
   const navigate = useNavigate();
-  const [role, setRole] = useState<Role>("student");
+  const [role, setRole] = useState<Role>("teacher");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -102,6 +102,10 @@ function SignupPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (role === "student") {
+      toast.error("Student registration is disabled.");
+      return;
+    }
     if (!canSubmit) {
       if (role === "student" && usn.trim() && !usnValid)
         return toast.error("Invalid USN format. Expected: 1GA + 2-digit year + 2-3 letter branch + 3-digit roll (e.g. 1GA22IS001 or 1GA22ISE001)");
@@ -220,8 +224,8 @@ function SignupPage() {
           </div>
         ) : (
           <>
-            {/* Role toggle */}
-            <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl border border-input bg-secondary p-1">
+            {/* Role toggle (Hidden - Student signup disabled) */}
+            <div className="hidden">
               <RoleTab active={role === "student"} onClick={() => setRole("student")} icon={<GraduationCap className="h-4 w-4" />}>
                 Student
               </RoleTab>
