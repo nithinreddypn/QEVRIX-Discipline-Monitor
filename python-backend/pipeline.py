@@ -121,7 +121,7 @@ def calculate_cosine_similarity(emb1, emb2):
 
 def detect_lanyard_color(person_crop, face_bbox):
     """
-    Extracts the chest region and counts pixels of high-saturation branch lanyard colors.
+    Extracts the chest region and looks for a strong, contiguous branch-color tag/lanyard.
     Returns (id_card_found, id_card_color_hex)
     """
     h, w, _ = person_crop.shape
@@ -145,45 +145,59 @@ def detect_lanyard_color(person_crop, face_bbox):
         
     hsv = cv2.cvtColor(chest_crop, cv2.COLOR_BGR2HSV)
     
-    # We will count pixels for each lanyard color:
-    # Yellow, Green, Blue, Red
-    # To be extremely accurate, we require Saturation >= 80 and Value >= 50.
-    # Lanyards have very bright, solid colors.
+    # Count only vivid pixels. This prevents normal clothing, shadows, and denim
+    # from being classified as an ID tag.
     h_vals = hsv[:, :, 0]
     s_vals = hsv[:, :, 1]
     v_vals = hsv[:, :, 2]
     
-    # Mask conditions: exclude very dark or very bright/desaturated colors
-    sat_val_mask = (s_vals >= 80) & (v_vals >= 50) & (v_vals <= 245)
-    
-    blue_count = np.sum(sat_val_mask & (h_vals >= 88) & (h_vals <= 132))
-    green_count = np.sum(sat_val_mask & (h_vals >= 35) & (h_vals < 88))
-    yellow_count = np.sum(sat_val_mask & (h_vals >= 15) & (h_vals < 35))
-    red_count = np.sum(sat_val_mask & ((h_vals < 15) | (h_vals >= 165)))
-    
-    total_pixels = chest_crop.shape[0] * chest_crop.shape[1]
-    
-    color_counts = {
-        "#3b82f6": blue_count,   # Blue
-        "#10b981": green_count,  # Green
-        "#f59e0b": yellow_count, # Yellow
-        "#ef4444": red_count     # Red
+    sat_val_mask = (s_vals >= 95) & (v_vals >= 70) & (v_vals <= 235)
+
+    color_masks = {
+        "#3b82f6": sat_val_mask & (h_vals >= 92) & (h_vals <= 128),   # Blue
+        "#10b981": sat_val_mask & (h_vals >= 38) & (h_vals < 84),     # Green
+        "#f59e0b": sat_val_mask & (h_vals >= 16) & (h_vals < 34),     # Yellow
+        "#ef4444": sat_val_mask & ((h_vals < 10) | (h_vals >= 170)),  # Red
     }
     
-    # Find the color with maximum matching pixels
-    best_color = None
-    best_count = 0
-    for color, count in color_counts.items():
-        if count > best_count:
-            best_count = count
-            best_color = color
-            
-    # Require at least 1.5% of chest area to match the lanyard color
-    ratio = float(best_count) / total_pixels
-    if best_color is not None and ratio >= 0.015:
+    total_pixels = chest_crop.shape[0] * chest_crop.shape[1]
+
+    scores = []
+    for color, mask in color_masks.items():
+        count = int(np.sum(mask))
+        component_ratio = largest_component_ratio(mask)
+        scores.append((color, count, component_ratio))
+
+    scores.sort(key=lambda item: item[1], reverse=True)
+    best_color, best_count, best_component_ratio = scores[0]
+    second_count = scores[1][1] if len(scores) > 1 else 0
+    pixel_ratio = float(best_count) / total_pixels
+
+    has_enough_pixels = pixel_ratio >= 0.035
+    has_dominant_color = second_count == 0 or best_count >= second_count * 1.8
+    has_contiguous_tag = best_component_ratio >= 0.012
+
+    if has_enough_pixels and has_dominant_color and has_contiguous_tag:
         return True, best_color
-        
+
     return False, None
+
+def largest_component_ratio(mask):
+    """
+    Returns the largest connected component area as a ratio of the whole mask.
+    A real lanyard/tag usually appears as a compact contiguous region; scattered
+    blue/green/yellow/red pixels in clothing should not pass this check.
+    """
+    mask_u8 = mask.astype(np.uint8) * 255
+    if mask_u8.size == 0 or np.count_nonzero(mask_u8) == 0:
+        return 0.0
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_u8, connectivity=8)
+    if num_labels <= 1:
+        return 0.0
+
+    largest = int(np.max(stats[1:, cv2.CC_STAT_AREA]))
+    return float(largest) / float(mask_u8.shape[0] * mask_u8.shape[1])
 
 def run_pipeline(image_path, student_database_embeddings, similarity_threshold=0.6):
     """

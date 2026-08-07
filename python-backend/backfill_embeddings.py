@@ -5,13 +5,18 @@ from supabase import create_client
 from pipeline import detect_face, get_face_embedding
 
 # Configuration
-SUPABASE_URL = "https://jrioxyykeqvmcnhitsta.supabase.co"
-SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaW94eXlrZXF2bWNuaGl0c3RhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTI4MTA5OSwiZXhwIjoyMTAwODU3MDk5fQ.M_WK2fKhoa26KA9jQotdZUQ2iCe8kXs4vwFvc_21ZiM"
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_backfill():
     print("="*60)
     print("      QEVRIX GUARDIAN - FACE EMBEDDINGS ONE-TIME BACKFILL      ")
     print("="*60)
+    if not SUPABASE_URL or not SERVICE_KEY:
+        raise RuntimeError(
+            "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. "
+            "Set them as environment variables before running backfill."
+        )
     
     # Initialize Supabase client
     supabase = create_client(SUPABASE_URL, SERVICE_KEY)

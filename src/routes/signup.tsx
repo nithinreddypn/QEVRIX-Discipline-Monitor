@@ -201,15 +201,17 @@ function SignupPage() {
         {signUpSuccessEmail ? (
           <div className="mt-6 space-y-6 text-center">
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary">
-              <Mail className="h-8 w-8 animate-bounce" />
+              <Check className="h-8 w-8" />
             </div>
             <div className="space-y-2">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">Confirm your email address</h2>
+              <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">Registration Submitted</h2>
               <p className="text-sm text-muted-foreground">
-                We sent a verification link to <strong className="text-foreground">{signUpSuccessEmail}</strong>.
+                Your request has been successfully received for <strong className="text-foreground">{signUpSuccessEmail}</strong>.
               </p>
               <p className="text-xs text-muted-foreground/80 leading-relaxed max-w-sm mx-auto">
-                Please click the link inside the email to verify your email address. Once verified, your signup request will automatically be sent to the department teachers for approval.
+                {role === "student"
+                  ? "Your request has been forwarded to the department branch teachers for approval. You will be able to log in once your profile is verified."
+                  : "Your request has been forwarded to the administrators for approval. You will be able to log in once your profile is approved."}
               </p>
             </div>
             <div className="pt-4">

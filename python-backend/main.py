@@ -3,14 +3,44 @@ import time
 import sys
 import datetime
 import numpy as np
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from supabase import create_client
 from pipeline import run_pipeline, detect_face, get_face_embedding, cv2
 
+# Load .env file from root directory if running locally
+def load_env():
+    try:
+        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip('"').strip("'")
+                        os.environ[key] = val
+            print(f"[Env] Successfully loaded environment variables from {env_path}")
+    except Exception as e:
+        print(f"[Env Loader] Warning: Could not load .env file: {e}")
+
+load_env()
+
 # Configuration
-SUPABASE_URL = "https://jrioxyykeqvmcnhitsta.supabase.co"
-SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaW94eXlrZXF2bWNuaGl0c3RhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTI4MTA5OSwiZXhwIjoyMTAwODU3MDk5fQ.M_WK2fKhoa26KA9jQotdZUQ2iCe8kXs4vwFvc_21ZiM"
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 MAX_RETRIES = 3
 POLL_INTERVAL = 5 # seconds
+
+if not SUPABASE_URL or not SERVICE_KEY:
+    raise RuntimeError(
+        "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. "
+        "Set them as environment variables before starting the worker."
+    )
 
 # Initialize Supabase client
 supabase = create_client(SUPABASE_URL, SERVICE_KEY)
@@ -39,7 +69,7 @@ def load_student_database():
 
     print("[Startup] Pre-loading active student registrations & face database...")
     try:
-        s_res = supabase.table("students").select("id, full_name, profile_photo_url, branch_id").eq("status", "active").execute()
+        s_res = supabase.table("students").select("id, full_name, profile_photo_url, branch_id, email").eq("status", "active").execute()
         students = s_res.data
         print(f"  Found {len(students)} active student records.")
 
@@ -164,6 +194,204 @@ def check_and_queue_new_uploads():
     except Exception as e:
         print(f"[Watcher] Error checking/queuing new uploads: {e}")
 
+def get_ist_now():
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    return utc_now.astimezone(ist_tz)
+
+def check_entry_time(detection_time_iso):
+    """
+    Parses detection time and converts it to IST (UTC+5:30).
+    Returns (is_late, ist_time_str)
+    College start time: 9:00 AM
+    College end time: 3:30 PM
+    """
+    try:
+        t_str = detection_time_iso.replace("Z", "+00:00")
+        dt_utc = datetime.datetime.fromisoformat(t_str)
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        dt_ist = dt_utc.astimezone(ist_tz)
+        hour = dt_ist.hour
+        minute = dt_ist.minute
+        # Permitted entry is up to 9:00 AM.
+        # Late if after 9:00 AM
+        is_late = (hour > 9) or (hour == 9 and minute > 0)
+        ist_time_str = dt_ist.strftime("%I:%M %p")
+        return is_late, ist_time_str
+    except Exception as e:
+        print(f"[Time Check] Error parsing detection time {detection_time_iso}: {e}")
+        # Fallback to current local time
+        dt_ist = get_ist_now()
+        hour = dt_ist.hour
+        minute = dt_ist.minute
+        is_late = (hour > 9) or (hour == 9 and minute > 0)
+        return is_late, dt_ist.strftime("%I:%M %p")
+
+def send_student_notification_email(student_email, student_name, reason, detection_time_str):
+    if not student_email:
+        print("[Email] No email found for student. Skipping.")
+        return False
+        
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = os.environ.get("SMTP_PORT")
+    smtp_secure = os.environ.get("SMTP_SECURE", "true") == "true"
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    smtp_from = os.environ.get("SMTP_FROM", f'"Qevrix Discipline Monitor" <{smtp_user}>')
+    
+    if not smtp_host or not smtp_user or not smtp_pass:
+        print("[Email] SMTP configuration incomplete. Cannot send email.")
+        return False
+        
+    try:
+        port = int(smtp_port) if smtp_port else (465 if smtp_secure else 587)
+    except ValueError:
+        port = 465 if smtp_secure else 587
+        
+    print(f"[Email] Sending notification to student {student_name} ({student_email}) for: {reason}...")
+    
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Discipline Notice: Entry Sighting Flagged - QEVRIX"
+    msg["From"] = smtp_from
+    msg["To"] = student_email
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Official Campus Entry Notice</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+      <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 40px 20px;">
+        <tr>
+          <td align="center">
+            <table width="100%" max-width="580px" style="max-width: 580px; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.025); border-collapse: separate;">
+              
+              <!-- Header Bar -->
+              <tr>
+                <td style="background-color: #ffffff; padding: 32px 32px 20px 32px; border-bottom: 1px solid #f1f5f9;">
+                  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                    <tr>
+                      <td style="font-size: 20px; font-weight: 700; color: #0f172a; letter-spacing: -0.025em; font-family: sans-serif;">
+                        <span style="color: #22c55e;">QEVRIX</span> GUARDIAN
+                      </td>
+                      <td align="right" style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-family: sans-serif;">
+                        Official Sighting Notice
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Alert Banner -->
+              <tr>
+                <td style="padding: 32px 32px 0 32px;">
+                  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #fef2f2; border-left: 4px solid #ef4444; border-radius: 8px; overflow: hidden;">
+                    <tr>
+                      <td style="padding: 16px 20px;">
+                        <span style="font-size: 14px; font-weight: 700; color: #991b1b; display: block; margin-bottom: 4px; font-family: sans-serif;">Campus Entry Notice</span>
+                        <span style="font-size: 13px; color: #7f1d1d; line-height: 1.5; display: block; font-family: sans-serif;">
+                          Your campus entry has been logged with one or more security/discipline infractions.
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Main Content -->
+              <tr>
+                <td style="padding: 24px 32px 32px 32px; font-family: sans-serif;">
+                  <p style="font-size: 15px; font-weight: 500; color: #0f172a; margin-top: 0; margin-bottom: 16px;">
+                    Dear <strong>{student_name}</strong>,
+                  </p>
+                  <p style="font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 24px;">
+                    This email is to notify you that our automated entry monitoring system recorded a campus entry with the following details:
+                  </p>
+
+                  <!-- Details Table -->
+                  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 24px; border-collapse: collapse;">
+                    <tr style="background-color: #f8fafc;">
+                      <td style="padding: 12px 16px; font-size: 12px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e5e7eb; width: 35%;">Parameter</td>
+                      <td style="padding: 12px 16px; font-size: 12px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e5e7eb;">Details</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #334155; border-bottom: 1px solid #f1f5f9;">Student Name</td>
+                      <td style="padding: 12px 16px; font-size: 13px; color: #0f172a; border-bottom: 1px solid #f1f5f9;">{student_name}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #334155; border-bottom: 1px solid #f1f5f9;">Arrival Time</td>
+                      <td style="padding: 12px 16px; font-size: 13px; color: #0f172a; border-bottom: 1px solid #f1f5f9;">{detection_time_str} IST</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #334155; border-bottom: 1px solid #f1f5f9;">Campus Hours</td>
+                      <td style="padding: 12px 16px; font-size: 13px; color: #0f172a; border-bottom: 1px solid #f1f5f9;">09:00 AM - 03:30 PM</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #334155; vertical-align: top;">Infraction Sighted</td>
+                      <td style="padding: 12px 16px; font-size: 13px; color: #ef4444; font-weight: 600; line-height: 1.4;">
+                        {reason}
+                      </td>
+                    </tr>
+                  </table>
+
+                  <!-- Guideline Section -->
+                  <h3 style="font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 24px; margin-bottom: 12px;">Official Campus Regulations</h3>
+                  <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #475569; line-height: 1.6;">
+                    <li style="margin-bottom: 8px;">Every student must visibly wear their official department branch ID card (with the correct branch color lanyard) at all times when entering and navigating the campus.</li>
+                    <li style="margin-bottom: 8px;">Official class hours begin at <strong>9:00 AM</strong>. Arriving after this time is classified as a late entry infraction.</li>
+                    <li style="margin-bottom: 8px;">Consistent failure to comply with ID card and arrival policies will be escalated to department heads and coordinators.</li>
+                  </ul>
+                </td>
+              </tr>
+
+              <!-- Footer Section -->
+              <tr>
+                <td style="background-color: #f8fafc; padding: 24px 32px; border-top: 1px solid #f1f5f9;">
+                  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                    <tr>
+                      <td style="font-size: 11px; line-height: 1.5; color: #94a3b8; font-family: sans-serif;">
+                        <strong>Department of Information Science and Engineering</strong><br />
+                        Global Academy of Technology (GAT)<br />
+                        Rajajinagar, Bengaluru, Karnataka, India
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-top: 16px; font-size: 10px; color: #cbd5e1; font-family: sans-serif; text-align: center;">
+                        This is an automated notification. Please do not reply directly to this email.
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+    
+    msg.attach(MIMEText(html_content, "html"))
+    
+    try:
+        if smtp_secure:
+            server = smtplib.SMTP_SSL(smtp_host, port)
+        else:
+            server = smtplib.SMTP(smtp_host, port)
+            server.starttls()
+            
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_user, student_email, msg.as_string())
+        server.quit()
+        print(f"[Email] Successfully sent email notification to {student_email}")
+        return True
+    except Exception as e:
+        print(f"[Email] Failed to send email to {student_email}: {e}")
+        return False
+
 def process_single_queue_item(item):
     """
     Processes a single queued image item through the pipeline.
@@ -201,6 +429,7 @@ def process_single_queue_item(item):
         branch_id = None
         expected_branch_color = None
         color_match = None
+        student_email = None
         
         if matched_student_id is not None:
             # Get student and branch details
@@ -208,6 +437,7 @@ def process_single_queue_item(item):
             if s_details:
                 student_name = s_details["full_name"]
                 branch_id = s_details["branch_id"]
+                student_email = s_details.get("email")
                 
                 if branch_id and branch_id in branch_cache:
                     expected_branch_color = branch_cache[branch_id]["color_hex"]
@@ -216,12 +446,33 @@ def process_single_queue_item(item):
         if result["id_card_found"] and expected_branch_color:
             color_match = result["id_card_color"] == expected_branch_color
             
+        # Check time bounds
+        detection_time_str = get_now_utc()
+        is_late, ist_time_str = check_entry_time(detection_time_str)
+        
         # 4. Resolve status
-        # If student is matched, and ID card matches branch color, status is verified.
-        # Otherwise it is flagged.
+        # If student is matched, ID card matches branch color, AND they are in-time, status is verified.
+        # Otherwise (missing ID, mismatched color, or late entry) it is flagged.
         status = "flagged"
-        if matched_student_id is not None and result["id_card_found"] and color_match is True:
+        if matched_student_id is not None and result["id_card_found"] and color_match is True and not is_late:
             status = "verified"
+            
+        # Send email if recognized student violates ID card requirement or entry time bounds
+        if matched_student_id is not None and student_email:
+            reasons = []
+            if not result["id_card_found"]:
+                reasons.append("Missing ID card (not worn)")
+            if is_late:
+                reasons.append(f"Late entry (entered at {ist_time_str}, after class start time of 9:00 AM)")
+                
+            if reasons:
+                reason_text = " and ".join(reasons)
+                send_student_notification_email(
+                    student_email=student_email,
+                    student_name=student_name,
+                    reason=reason_text,
+                    detection_time_str=ist_time_str
+                )
             
         # 5. Insert exactly ONE completed row into detections table using upsert to avoid duplicates
         print(f"  Inserting completed detection log into database (status: {status})...")
@@ -238,7 +489,7 @@ def process_single_queue_item(item):
                 "face_similarity": result["face_similarity"],
                 "confidence": result["confidence"],
                 "status": status,
-                "detection_time": get_now_utc(),
+                "detection_time": detection_time_str,
                 "notification_sent": False
             }, on_conflict="image_url").execute()
         except Exception as upsert_err:
