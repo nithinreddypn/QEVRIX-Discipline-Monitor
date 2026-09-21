@@ -55,6 +55,15 @@ def get_now_utc():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 def get_college_timings():
+    # 1. Try downloading from Supabase storage (always synced with web app)
+    try:
+        data = supabase.storage.from_("student-photos").download("college_timings.json")
+        if data:
+            return json.loads(data.decode("utf-8"))
+    except Exception:
+        pass
+
+    # 2. Fallback to local college_timings.json
     try:
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         timings_path = os.path.join(root_dir, "college_timings.json")
@@ -63,11 +72,13 @@ def get_college_timings():
                 return json.load(f)
     except Exception as e:
         print(f"[Timings] Warning reading college_timings.json: {e}")
+
     return {
-        "college_start_time": "08:30",
-        "college_end_time": "16:30",
-        "late_arrival_cutoff": "09:00",
-        "grace_period_mins": 15
+        "college_start": "08:30",
+        "late_threshold": "09:00",
+        "college_end": "16:30",
+        "working_days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        "breaks": []
     }
 
 def load_student_database():
@@ -220,7 +231,7 @@ def check_entry_time(detection_time_iso):
     Returns (is_late, ist_time_str, disp_cutoff)
     """
     timings = get_college_timings()
-    cutoff_str = timings.get("late_arrival_cutoff", "09:00")
+    cutoff_str = timings.get("late_threshold") or timings.get("late_arrival_cutoff", "09:00")
     grace_mins = int(timings.get("grace_period_mins", 0))
     
     try:

@@ -187,7 +187,21 @@ function BranchesPage() {
 
   const saveTimings = useMutation({
     mutationFn: async (data: CollegeTimings) => {
-      return await saveCollegeTimings({ data });
+      try {
+        return await saveCollegeTimings({ data });
+      } catch (err) {
+        // Fallback: Direct client-side upload to Supabase storage if server function is unreachable
+        const toSave = { ...data, updated_at: new Date().toISOString() };
+        const jsonBlob = new Blob([JSON.stringify(toSave, null, 2)], { type: "application/json" });
+        const { error: storageError } = await supabase.storage
+          .from("student-photos")
+          .upload("college_timings.json", jsonBlob, {
+            upsert: true,
+            contentType: "application/json",
+          });
+        if (storageError) throw err;
+        return { success: true, data: toSave };
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["college-timings"] });
