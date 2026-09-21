@@ -15,7 +15,8 @@ import {
   X,
   RefreshCw,
   Eye,
-  UserCheck
+  UserCheck,
+  Calendar
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -94,6 +95,24 @@ function DetectionsPage() {
   const [idFound, setIdFound] = useState<"all" | "yes" | "no">("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  const hasActiveFilters = Boolean(
+    q.trim() !== "" ||
+    branchId !== "all" ||
+    status !== "all" ||
+    idFound !== "all" ||
+    from !== "" ||
+    to !== ""
+  );
+
+  const resetFilters = () => {
+    setQ("");
+    setBranchId("all");
+    setStatus("all");
+    setIdFound("all");
+    setFrom("");
+    setTo("");
+  };
 
   // Test Modal states
   const [testModalOpen, setTestModalOpen] = useState(false);
@@ -299,53 +318,157 @@ function DetectionsPage() {
         </div>
       </header>
 
-      <div className="card-surface p-4">
-        <div className="grid gap-3 md:grid-cols-6">
-          <div className="relative md:col-span-2 group">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-all duration-500 group-focus-within:rotate-[360deg] group-focus-within:text-primary" />
+      <div className="card-surface p-4 space-y-3">
+        {/* Primary Filter Row: Search & Key Dropdowns */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[260px] group">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-all duration-300 group-focus-within:text-primary" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={typewriterText}
-              className="w-full rounded-md border border-input bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className="w-full rounded-lg border border-input bg-background/60 py-2 pl-9 pr-8 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
+            {q && (
+              <button
+                type="button"
+                onClick={() => setQ("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground transition"
+                title="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-          <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className={selectCls}>
-            <option value="all">All branches</option>
+
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className={`${selectCls} min-w-[140px]`}
+          >
+            <option value="all">All Branches</option>
             {branches.data?.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name} ({b.code})
               </option>
             ))}
           </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value as any)} className={selectCls}>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                Status: {s}
-              </option>
-            ))}
+
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as any)}
+            className={`${selectCls} min-w-[130px]`}
+          >
+            <option value="all">All Statuses</option>
+            <option value="verified">Verified</option>
+            <option value="flagged">Flagged</option>
+            <option value="pending">Pending</option>
+            <option value="unknown">Unknown</option>
           </select>
-          <select value={idFound} onChange={(e) => setIdFound(e.target.value as any)} className={selectCls}>
-            <option value="all">ID: all</option>
-            <option value="yes">ID worn</option>
-            <option value="no">ID missing</option>
+
+          <select
+            value={idFound}
+            onChange={(e) => setIdFound(e.target.value as any)}
+            className={`${selectCls} min-w-[125px]`}
+          >
+            <option value="all">All ID Badges</option>
+            <option value="yes">ID Worn</option>
+            <option value="no">ID Missing</option>
           </select>
-          <div className="flex gap-2">
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className={`${selectCls} w-full text-xs`}
-              title="From date"
-            />
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className={`${selectCls} w-full text-xs`}
-              title="To date"
-            />
+        </div>
+
+        {/* Secondary Filter Row: Date Range & Active Filters Reset */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-border/60 text-xs">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground font-medium">
+              <Calendar className="h-3.5 w-3.5" /> Date Range:
+            </span>
+            <div className="inline-flex items-center gap-2 rounded-lg border border-input bg-background/60 px-2.5 py-1.5 shadow-sm">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">From:</span>
+                <input
+                  type="date"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                  className="bg-transparent text-xs text-foreground outline-none cursor-pointer"
+                />
+              </div>
+              <span className="text-muted-foreground/60">—</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">To:</span>
+                <input
+                  type="date"
+                  value={to}
+                  onChange={(e) => setTo(e.target.value)}
+                  className="bg-transparent text-xs text-foreground outline-none cursor-pointer"
+                />
+              </div>
+              {(from || to) && (
+                <button
+                  type="button"
+                  onClick={() => { setFrom(""); setTo(""); }}
+                  className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground transition"
+                  title="Clear dates"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Quick date presets */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const today = new Date().toISOString().slice(0, 10);
+                  setFrom(today);
+                  setTo(today);
+                }}
+                className={`rounded-md px-2.5 py-1 text-xs transition border ${
+                  from && to && from === to && from === new Date().toISOString().slice(0, 10)
+                    ? "bg-primary text-primary-foreground border-primary font-semibold"
+                    : "bg-secondary/60 text-muted-foreground border-border hover:text-foreground hover:bg-secondary"
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 7);
+                  setFrom(d.toISOString().slice(0, 10));
+                  setTo(new Date().toISOString().slice(0, 10));
+                }}
+                className="rounded-md px-2.5 py-1 text-xs bg-secondary/60 text-muted-foreground border border-border hover:text-foreground hover:bg-secondary transition"
+              >
+                Past 7 Days
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 30);
+                  setFrom(d.toISOString().slice(0, 10));
+                  setTo(new Date().toISOString().slice(0, 10));
+                }}
+                className="rounded-md px-2.5 py-1 text-xs bg-secondary/60 text-muted-foreground border border-border hover:text-foreground hover:bg-secondary transition"
+              >
+                Past 30 Days
+              </button>
+            </div>
           </div>
+
+          {/* Reset all filters */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex items-center gap-1.5 text-xs text-rose-500 hover:text-rose-600 transition font-medium hover:underline"
+            >
+              <RefreshCw className="h-3 w-3" /> Reset all filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -368,7 +491,7 @@ function DetectionsPage() {
                   <th className="px-6 py-3">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border bg-white">
+              <tbody className="divide-y divide-border bg-card">
                 {filtered.map((r) => {
                   const d = new Date(r.detection_time);
                   return (
@@ -629,7 +752,7 @@ function DetectionsPage() {
 }
 
 const selectCls =
-  "rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+  "rounded-lg border border-input bg-background/60 text-foreground px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 function escapeCsv(v: string) {
   if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
