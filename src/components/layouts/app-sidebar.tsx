@@ -50,7 +50,7 @@ function useTeacherGroups(): NavGroup[] {
       const { data: teacher } = await supabase
         .from("teachers")
         .select("branch_id")
-        .eq("user_id", user.id)
+        .eq("user_id", user!.id)
         .maybeSingle();
       
       const q = supabase

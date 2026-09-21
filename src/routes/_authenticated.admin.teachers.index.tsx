@@ -223,7 +223,8 @@ function TeachersPage() {
                 <td className="whitespace-nowrap px-6 py-3.5 text-muted-foreground">{t.phone ?? "—"}</td>
                 <td className="whitespace-nowrap px-6 py-3.5 text-right">
                   <Link
-                    to={`/admin/teachers/${t.id}`}
+                    to="/admin/teachers/$id"
+                    params={{ id: t.id }}
                     className="mr-2 inline-flex items-center justify-center rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
                   >
                     <Eye className="h-4 w-4" />

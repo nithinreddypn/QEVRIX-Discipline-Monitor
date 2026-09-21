@@ -1,14 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, GraduationCap, Mail, Phone, UserCheck, X } from "lucide-react";
+import { Building2, Calendar, Check, ExternalLink, Eye, GraduationCap, Mail, Phone, UserCheck, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { decideStudentApproval, fetchPendingStudents } from "@/lib/email";
 import { ProfilePhoto } from "@/components/common/ProfilePhoto";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/teacher/approvals")({
@@ -22,6 +22,8 @@ export const Route = createFileRoute("/_authenticated/teacher/approvals")({
   component: ApprovalsPage,
 });
 
+type BranchInfo = { name: string; code: string; color_hex: string };
+
 type PendingStudent = {
   id: string;
   full_name: string;
@@ -34,12 +36,14 @@ type PendingStudent = {
   status: string;
   rejection_reason?: string | null;
   branch_id: string | null;
+  branches?: BranchInfo | BranchInfo[] | null;
 };
 
 function ApprovalsPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [rejectTarget, setRejectTarget] = useState<PendingStudent | null>(null);
+  const [viewProfileTarget, setViewProfileTarget] = useState<PendingStudent | null>(null);
   const [reason, setReason] = useState("");
   const [activeTab, setActiveTab] = useState<"pending" | "approved" | "rejected">("pending");
 
@@ -63,12 +67,11 @@ function ApprovalsPage() {
     queryFn: async (): Promise<PendingStudent[]> => {
       // Use server function with service role to bypass RLS
       const data = await fetchPendingStudents();
-      return (data as PendingStudent[]) ?? [];
+      return (data as unknown as PendingStudent[]) ?? [];
     },
   });
 
   const decide = useMutation({
-    motionFn: undefined,
     mutationFn: async ({ id, status, rejection_reason }: { id: string; status: "active" | "rejected"; rejection_reason?: string }) => {
       await decideStudentApproval({
         data: {
@@ -168,17 +171,28 @@ function ApprovalsPage() {
             <li key={s.id} className="card-surface p-5 flex flex-col justify-between">
               <div>
                 <div className="flex items-start gap-4">
-                  <ProfilePhoto
-                    src={s.profile_photo_url}
-                    className="h-16 w-16 rounded-xl"
-                    iconSizeClassName="h-6 w-6"
-                    fallbackIcon={GraduationCap}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setViewProfileTarget(s)}
+                    className="transition-transform hover:scale-105"
+                    title="Click to view profile"
+                  >
+                    <ProfilePhoto
+                      src={s.profile_photo_url}
+                      className="h-16 w-16 rounded-xl cursor-pointer"
+                      iconSizeClassName="h-6 w-6"
+                      fallbackIcon={GraduationCap}
+                    />
+                  </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <div className="truncate font-display text-base font-semibold tracking-tight">
+                      <button
+                        type="button"
+                        onClick={() => setViewProfileTarget(s)}
+                        className="truncate font-display text-base font-semibold tracking-tight hover:text-primary transition-colors text-left"
+                      >
                         {s.full_name}
-                      </div>
+                      </button>
                       {s.status === "pending_approval" && (
                         <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-500">
                           Pending
@@ -213,7 +227,15 @@ function ApprovalsPage() {
                 )}
               </div>
 
-              <div className="mt-4 flex items-center gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewProfileTarget(s)}
+                  className="btn-ghost px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1.5 border border-border rounded-md"
+                  title="View full candidate profile"
+                >
+                  <Eye className="h-3.5 w-3.5" /> View Profile
+                </button>
                 {s.status === "pending_approval" && (
                   <>
                     <button
@@ -256,6 +278,7 @@ function ApprovalsPage() {
         </ul>
       )}
 
+      {/* Reject Confirmation Dialog */}
       <Dialog open={!!rejectTarget} onOpenChange={(o) => !o && setRejectTarget(null)}>
         <DialogContent>
           <DialogHeader>
@@ -286,6 +309,149 @@ function ApprovalsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* View Student Profile Dialog */}
+      {viewProfileTarget && (
+        <Dialog open={!!viewProfileTarget} onOpenChange={(o) => { if (!o) setViewProfileTarget(null); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <div className="flex items-center gap-2">
+                <DialogTitle>Student Profile</DialogTitle>
+                {viewProfileTarget.status === "pending_approval" && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Pending</span>
+                )}
+                {viewProfileTarget.status === "active" && (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Approved</span>
+                )}
+                {viewProfileTarget.status === "rejected" && (
+                  <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Rejected</span>
+                )}
+              </div>
+              <DialogDescription>
+                Registration and academic details for this student candidate.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-3 space-y-4">
+              {/* Header card with photo and name */}
+              <div className="flex items-center gap-4 rounded-xl border border-border bg-muted/20 p-4">
+                <ProfilePhoto
+                  src={viewProfileTarget.profile_photo_url}
+                  className="h-16 w-16 rounded-xl border border-border"
+                  iconSizeClassName="h-8 w-8"
+                  fallbackIcon={GraduationCap}
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold tracking-tight text-foreground truncate">
+                    {viewProfileTarget.full_name}
+                  </h3>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    USN: <span className="font-mono font-medium text-foreground">{viewProfileTarget.usn}</span>
+                    {viewProfileTarget.semester ? ` · Semester ${viewProfileTarget.semester}` : ""}
+                  </div>
+                  {(() => {
+                    const b = Array.isArray(viewProfileTarget.branches)
+                      ? viewProfileTarget.branches[0]
+                      : viewProfileTarget.branches;
+                    if (!b) return null;
+                    return (
+                      <div
+                        className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium"
+                        style={{ color: b.color_hex }}
+                      >
+                        <Building2 className="h-3.5 w-3.5" />
+                        {b.name} ({b.code})
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Information Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Email Address</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground truncate">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{viewProfileTarget.email || "Not provided"}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Phone Number</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground truncate">
+                    <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{viewProfileTarget.phone || "Not provided"}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Semester / Academic Year</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground">
+                    <GraduationCap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span>{viewProfileTarget.semester ? `Semester ${viewProfileTarget.semester}` : "Not specified"}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Registration Date</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground">
+                    <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span>{new Date(viewProfileTarget.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Decision Note or Rejection Reason if present */}
+              {viewProfileTarget.rejection_reason && (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+                  <strong className="block mb-0.5">Decision Note / Rejection Reason:</strong>
+                  {viewProfileTarget.rejection_reason}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="mt-4 flex flex-wrap sm:justify-between items-center gap-2">
+              <Link
+                to="/teacher/students/$id"
+                params={{ id: viewProfileTarget.id }}
+                className="btn-ghost text-xs inline-flex items-center gap-1.5 border border-border"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Full Profile Page
+              </Link>
+              <div className="flex gap-2">
+                {viewProfileTarget.status === "pending_approval" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        const target = viewProfileTarget;
+                        setViewProfileTarget(null);
+                        setRejectTarget(target);
+                        setReason("");
+                      }}
+                      className="btn-ghost text-xs text-destructive hover:bg-destructive/10"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={() => {
+                        decide.mutate({ id: viewProfileTarget.id, status: "active" });
+                        setViewProfileTarget(null);
+                      }}
+                      className="btn-primary text-xs"
+                    >
+                      Approve
+                    </button>
+                  </>
+                )}
+                <button onClick={() => setViewProfileTarget(null)} className="btn-ghost text-xs">
+                  Close
+                </button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

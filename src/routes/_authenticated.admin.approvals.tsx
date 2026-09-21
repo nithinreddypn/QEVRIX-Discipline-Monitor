@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Building2, Mail, Phone, UserRound } from "lucide-react";
+import { Building2, Calendar, ExternalLink, Eye, GraduationCap, Mail, Phone, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfilePhoto } from "@/components/common/ProfilePhoto";
@@ -61,6 +61,13 @@ function RegistrationApprovalsPage() {
   // Reject dialog states
   const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string; type: "teacher" | "student" } | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+
+  // View profile dialog state
+  const [viewProfileTarget, setViewProfileTarget] = useState<
+    | { type: "teacher"; data: PendingTeacher }
+    | { type: "student"; data: StudentRow }
+    | null
+  >(null);
 
   const teachersQ = useQuery({
     queryKey: ["admin-teacher-approvals"],
@@ -226,14 +233,27 @@ function RegistrationApprovalsPage() {
             {filteredTeachers.map((t) => (
               <article key={t.id} className="card-surface p-5">
                 <div className="flex flex-wrap items-start gap-4">
-                  <ProfilePhoto
-                    src={t.profile_photo_url}
-                    className="h-12 w-12"
-                    iconSizeClassName="h-6 w-6"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setViewProfileTarget({ type: "teacher", data: t })}
+                    className="transition-transform hover:scale-105"
+                    title="Click to view profile"
+                  >
+                    <ProfilePhoto
+                      src={t.profile_photo_url}
+                      className="h-12 w-12 cursor-pointer"
+                      iconSizeClassName="h-6 w-6"
+                    />
+                  </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-display text-base font-semibold tracking-tight">{t.full_name}</h2>
+                      <button
+                        type="button"
+                        onClick={() => setViewProfileTarget({ type: "teacher", data: t })}
+                        className="font-display text-base font-semibold tracking-tight hover:text-primary transition-colors text-left"
+                      >
+                        {t.full_name}
+                      </button>
                       {t.status === "pending_approval" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Pending</span>}
                       {t.status === "active" && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Approved</span>}
                       {t.status === "rejected" && <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Rejected</span>}
@@ -254,7 +274,16 @@ function RegistrationApprovalsPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewProfileTarget({ type: "teacher", data: t })}
+                      className="btn-ghost px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 border border-border"
+                      title="View Profile Details"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View Profile
+                    </button>
                     {t.status === "pending_approval" && (
                       <>
                         <button
@@ -307,14 +336,28 @@ function RegistrationApprovalsPage() {
             {filteredStudents.map((s) => (
               <article key={s.id} className="card-surface p-5">
                 <div className="flex flex-wrap items-start gap-4">
-                  <ProfilePhoto
-                    src={s.profile_photo_url}
-                    className="h-12 w-12"
-                    iconSizeClassName="h-6 w-6"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setViewProfileTarget({ type: "student", data: s })}
+                    className="transition-transform hover:scale-105"
+                    title="Click to view profile"
+                  >
+                    <ProfilePhoto
+                      src={s.profile_photo_url}
+                      className="h-12 w-12 cursor-pointer"
+                      iconSizeClassName="h-6 w-6"
+                      fallbackIcon={GraduationCap}
+                    />
+                  </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-display text-base font-semibold tracking-tight">{s.full_name}</h2>
+                      <button
+                        type="button"
+                        onClick={() => setViewProfileTarget({ type: "student", data: s })}
+                        className="font-display text-base font-semibold tracking-tight hover:text-primary transition-colors text-left"
+                      >
+                        {s.full_name}
+                      </button>
                       {s.status === "pending_approval" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Pending</span>}
                       {s.status === "active" && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Approved</span>}
                       {s.status === "rejected" && <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Rejected</span>}
@@ -340,7 +383,16 @@ function RegistrationApprovalsPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewProfileTarget({ type: "student", data: s })}
+                      className="btn-ghost px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 border border-border"
+                      title="View Profile Details"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View Profile
+                    </button>
                     {s.status === "pending_approval" && (
                       <>
                         <button
@@ -383,6 +435,7 @@ function RegistrationApprovalsPage() {
         )
       )}
 
+      {/* Reject Dialog */}
       {rejectTarget && (
         <Dialog open={!!rejectTarget} onOpenChange={(o) => { if (!o) { setRejectTarget(null); setRejectionReason(""); } }}>
           <DialogContent className="max-w-md">
@@ -414,6 +467,152 @@ function RegistrationApprovalsPage() {
               >
                 Reject {rejectTarget.type}
               </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* View Profile Dialog */}
+      {viewProfileTarget && (
+        <Dialog open={!!viewProfileTarget} onOpenChange={(o) => { if (!o) setViewProfileTarget(null); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <div className="flex items-center gap-2">
+                <DialogTitle>
+                  {viewProfileTarget.type === "teacher" ? "Teacher Profile" : "Student Profile"}
+                </DialogTitle>
+                {viewProfileTarget.data.status === "pending_approval" && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Pending</span>
+                )}
+                {viewProfileTarget.data.status === "active" && (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Approved</span>
+                )}
+                {viewProfileTarget.data.status === "rejected" && (
+                  <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Rejected</span>
+                )}
+              </div>
+              <DialogDescription>
+                Candidate details submitted during account registration.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-3 space-y-4">
+              {/* Header card with photo and name */}
+              <div className="flex items-center gap-4 rounded-xl border border-border bg-muted/20 p-4">
+                <ProfilePhoto
+                  src={viewProfileTarget.data.profile_photo_url}
+                  className="h-16 w-16 rounded-xl border border-border"
+                  iconSizeClassName="h-8 w-8"
+                  fallbackIcon={viewProfileTarget.type === "student" ? GraduationCap : UserRound}
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold tracking-tight text-foreground truncate">
+                    {viewProfileTarget.data.full_name}
+                  </h3>
+                  {viewProfileTarget.type === "student" && (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      USN: <span className="font-mono font-medium text-foreground">{(viewProfileTarget.data as StudentRow).usn}</span>
+                      {(viewProfileTarget.data as StudentRow).semester ? ` · Semester ${(viewProfileTarget.data as StudentRow).semester}` : ""}
+                    </div>
+                  )}
+                  {viewProfileTarget.data.branches && (
+                    <div
+                      className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium"
+                      style={{ color: viewProfileTarget.data.branches.color_hex }}
+                    >
+                      <Building2 className="h-3.5 w-3.5" />
+                      {viewProfileTarget.data.branches.name} ({viewProfileTarget.data.branches.code})
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Contact and Metadata Details Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Email Address</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground truncate">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{viewProfileTarget.data.email || "Not provided"}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Phone Number</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground truncate">
+                    <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{viewProfileTarget.data.phone || "Not provided"}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Department / Branch</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground truncate">
+                    <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">
+                      {viewProfileTarget.data.branches ? `${viewProfileTarget.data.branches.code} - ${viewProfileTarget.data.branches.name}` : "Not assigned"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-2.5 bg-card">
+                  <span className="text-muted-foreground block text-[11px]">Registration Date</span>
+                  <div className="mt-1 flex items-center gap-1.5 font-medium text-foreground">
+                    <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span>{new Date(viewProfileTarget.data.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Decision Note or Rejection Reason if present */}
+              {viewProfileTarget.data.rejection_reason && (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+                  <strong className="block mb-0.5">Decision Note / Rejection Reason:</strong>
+                  {viewProfileTarget.data.rejection_reason}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="mt-4 flex flex-wrap sm:justify-between items-center gap-2">
+              <Link
+                to={viewProfileTarget.type === "teacher" ? "/admin/teachers/$id" : "/admin/students/$id"}
+                params={{ id: viewProfileTarget.data.id }}
+                className="btn-ghost text-xs inline-flex items-center gap-1.5 border border-border"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Full Profile Page
+              </Link>
+              <div className="flex gap-2">
+                {viewProfileTarget.data.status === "pending_approval" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        const target = { id: viewProfileTarget.data.id, name: viewProfileTarget.data.full_name, type: viewProfileTarget.type };
+                        setViewProfileTarget(null);
+                        setRejectTarget(target);
+                      }}
+                      className="btn-ghost text-xs text-destructive hover:bg-destructive/10"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (viewProfileTarget.type === "teacher") {
+                          decideTeacher.mutate({ id: viewProfileTarget.data.id, approve: true });
+                        } else {
+                          decideStudent.mutate({ id: viewProfileTarget.data.id, approve: true });
+                        }
+                        setViewProfileTarget(null);
+                      }}
+                      className="btn-primary text-xs"
+                    >
+                      Approve
+                    </button>
+                  </>
+                )}
+                <button onClick={() => setViewProfileTarget(null)} className="btn-ghost text-xs">
+                  Close
+                </button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>

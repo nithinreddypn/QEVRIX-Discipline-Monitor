@@ -107,8 +107,6 @@ function SignupPage() {
       return;
     }
     if (!canSubmit) {
-      if (role === "student" && usn.trim() && !usnValid)
-        return toast.error("Invalid USN format. Expected: 1GA + 2-digit year + 2-3 letter branch + 3-digit roll (e.g. 1GA22IS001 or 1GA22ISE001)");
       if (score < 4) return toast.error("Please choose a stronger password");
       if (!matches) return toast.error("Passwords do not match");
       if (!accepted) return toast.error("Please accept the Terms and Privacy Policy");
@@ -128,8 +126,8 @@ function SignupPage() {
           role,
           phone: phone || null,
           branch_id: branchId || null,
-          usn: role === "student" ? usn : null,
-          semester: role === "student" ? Number(semester) : null,
+          usn: null,
+          semester: null,
           profile_photo_path: null,
         },
       },
@@ -151,9 +149,9 @@ function SignupPage() {
           email,
           fullName,
           role,
-          usn: role === "student" ? usn : undefined,
+          usn: undefined,
           branchId: branchId || undefined,
-          semester: role === "student" ? Number(semester) : undefined,
+          semester: undefined,
           phone: phone || undefined,
         }
       });

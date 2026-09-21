@@ -21,7 +21,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    // If user arrived with a recovery hash on any page other than /reset-password, forward them
+    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) {
+      if (window.location.pathname !== "/reset-password") {
+        window.location.replace(`/reset-password${window.location.hash}`);
+        return;
+      }
+    }
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY" && typeof window !== "undefined" && window.location.pathname !== "/reset-password") {
+        window.location.replace("/reset-password");
+        return;
+      }
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {

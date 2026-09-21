@@ -136,7 +136,25 @@ export const sendRecoveryEmail = createServerFn({ method: "POST" })
       throw new Error("Failed to generate password recovery link.");
     }
 
-    const actionLink = linkData.properties.action_link;
+    const hashedToken = linkData.properties?.hashed_token;
+    const emailOtp = linkData.properties?.email_otp;
+    const actionLink = linkData.properties?.action_link;
+
+    // Construct direct app reset link so the user lands straight on /reset-password
+    // in the exact environment they requested it from (e.g. localhost or production)
+    let directResetLink = actionLink;
+    if (hashedToken) {
+      try {
+        const parsed = new URL(redirectTo);
+        parsed.searchParams.set("token_hash", hashedToken);
+        parsed.searchParams.set("type", "recovery");
+        parsed.searchParams.set("email", email);
+        directResetLink = parsed.toString();
+      } catch {
+        const sep = redirectTo.includes("?") ? "&" : "?";
+        directResetLink = `${redirectTo}${sep}token_hash=${hashedToken}&type=recovery&email=${encodeURIComponent(email)}`;
+      }
+    }
 
     // 4. Configure Nodemailer transport using Google SMTP credentials
     const transporter = nodemailer.createTransport({
@@ -161,11 +179,17 @@ export const sendRecoveryEmail = createServerFn({ method: "POST" })
           </div>
           <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin-top: 0; margin-bottom: 16px;">Set your new password</h2>
           <p style="font-size: 15px; line-height: 1.6; color: #475569; margin-bottom: 24px;">
-            We received a request to reset the password for your QEVRIX account. Please click the button below to configure your new credentials:
+            We received a request to reset the password for your QEVRIX account. Click the button below to configure your new credentials:
           </p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${actionLink}" style="background-color: #22c55e; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.2);">Reset Password</a>
+          <div style="text-align: center; margin: 26px 0;">
+            <a href="${directResetLink}" style="background-color: #22c55e; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.2);">Reset Password</a>
           </div>
+          ${emailOtp ? `
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 24px 0; text-align: center;">
+            <p style="font-size: 13px; color: #64748b; margin: 0 0 8px 0; font-weight: 500;">Or use this 8-digit verification code directly on the reset page:</p>
+            <div style="font-family: monospace; font-size: 26px; font-weight: 700; letter-spacing: 6px; color: #0f172a; padding: 4px 0;">${emailOtp}</div>
+          </div>
+          ` : ""}
           <p style="font-size: 13px; line-height: 1.5; color: #64748b; margin-top: 24px;">
             If you did not request this email, you can safely ignore it. Your password will remain unchanged.
           </p>
@@ -669,7 +693,7 @@ export const fetchPendingStudents = createServerFn({ method: "GET" })
 
     const { data, error } = await supabaseAdmin
       .from("students")
-      .select("id, full_name, usn, semester, phone, email, profile_photo_url, created_at, status, rejection_reason, branch_id")
+      .select("id, full_name, usn, semester, phone, email, profile_photo_url, created_at, status, rejection_reason, branch_id, branches(name, code, color_hex)")
       .order("created_at", { ascending: false });
 
     if (error) {

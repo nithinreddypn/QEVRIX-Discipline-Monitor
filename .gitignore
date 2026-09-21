@@ -44,3 +44,7 @@ venv/
 
 # PyTorch weights
 *.pt
+
+# Vercel & Scratch
+.vercel/
+scratch/

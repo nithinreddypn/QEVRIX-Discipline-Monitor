@@ -1,13 +1,14 @@
 import os
 import time
 import sys
+import json
 import datetime
 import numpy as np
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from supabase import create_client
-from pipeline import run_pipeline, detect_face, get_face_embedding, cv2
+from pipeline import run_pipeline, detect_face, get_face_embedding, is_color_match, cv2
 
 # Load .env file from root directory if running locally
 def load_env():
@@ -53,10 +54,28 @@ branch_cache = {}
 def get_now_utc():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+def get_college_timings():
+    try:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        timings_path = os.path.join(root_dir, "college_timings.json")
+        if os.path.exists(timings_path):
+            with open(timings_path, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Timings] Warning reading college_timings.json: {e}")
+    return {
+        "college_start_time": "08:30",
+        "college_end_time": "16:30",
+        "late_arrival_cutoff": "09:00",
+        "grace_period_mins": 15
+    }
+
 def load_student_database():
     """
-    On startup, queries all active students, downloads their registration photos,
-    computes face embeddings, and caches them in memory.
+    On startup or periodic refresh:
+    Queries registered students (active and pending approval),
+    loads face embeddings from student_embeddings table or computes them from photos,
+    and caches them in-memory.
     """
     global student_embeddings, student_info, branch_cache
     print("[Startup] Caching branches...")
@@ -67,11 +86,11 @@ def load_student_database():
     except Exception as e:
         print(f"  Error loading branches: {e}")
 
-    print("[Startup] Pre-loading active student registrations & face database...")
+    print("[Startup] Pre-loading registered student records & face database...")
     try:
-        s_res = supabase.table("students").select("id, full_name, profile_photo_url, branch_id, email").eq("status", "active").execute()
+        s_res = supabase.table("students").select("id, full_name, profile_photo_url, branch_id, email, status").in_("status", ["active", "pending_approval"]).execute()
         students = s_res.data
-        print(f"  Found {len(students)} active student records.")
+        print(f"  Found {len(students)} registered student records.")
 
         # Try to query already persisted embeddings
         has_db_table = False
@@ -82,7 +101,7 @@ def load_student_database():
             has_db_table = True
             print(f"  Found {len(db_embeddings)} persisted face embeddings in student_embeddings table.")
         except Exception as e:
-            print(f"  [Info] student_embeddings table not available or empty (will generate in-memory fallbacks): {e}")
+            print(f"  [Info] student_embeddings table query error: {e}")
 
         for student in students:
             student_id = student["id"]
@@ -96,19 +115,17 @@ def load_student_database():
                 if student_id in db_embeddings and db_embeddings[student_id]["model_version"] == expected_version:
                     raw_emb = db_embeddings[student_id]["embedding"]
                     student_embeddings[student_id] = np.array(raw_emb, dtype=np.float32)
-                    print(f"  Loaded persisted embedding for student: {student['full_name']}")
+                    print(f"  Loaded persisted embedding for: {student['full_name']} ({student['status']})")
                     continue
                 
                 # Otherwise, download registration photo and extract embedding
                 temp_filename = f"temp_reg_{student_id}.jpg"
                 try:
-                    print(f"  Generating/updating embedding for student: {student['full_name']}...")
-                    # Download registration photo
+                    print(f"  Generating embedding for student: {student['full_name']}...")
                     with open(temp_filename, "wb") as f:
                         file_data = supabase.storage.from_("student-photos").download(photo_url)
                         f.write(file_data)
                     
-                    # Compute embedding
                     img = cv2.imread(temp_filename)
                     if img is not None:
                         face_crop, _ = detect_face(img)
@@ -128,9 +145,9 @@ def load_student_database():
                                 except Exception as dbe:
                                     print(f"    [Warning] Failed to persist embedding: {dbe}")
                         else:
-                            print(f"    [Warning] No face detected in registration photo for student: {student['full_name']}")
+                            print(f"    [Warning] No face detected in photo for: {student['full_name']}")
                     else:
-                        print(f"    [Warning] Failed to read registration image for student: {student['full_name']}")
+                        print(f"    [Warning] Failed to read registration image for: {student['full_name']}")
                 except Exception as e:
                     print(f"    [Warning] Error generating embedding for student {student['full_name']}: {e}")
                 finally:
@@ -158,7 +175,6 @@ def list_all_bucket_files(bucket_name, prefix=""):
             is_folder = item.get("id") is None
             
             if is_folder:
-                # Recursive call
                 sub_prefix = f"{prefix}/{name}" if prefix else name
                 files.extend(list_all_bucket_files(bucket_name, sub_prefix))
             else:
@@ -175,17 +191,15 @@ def check_and_queue_new_uploads():
     Checks the storage bucket for new image uploads and appends them
     to the processing_queue table in the database if not present.
     """
-    print("[Watcher] Checking for new uploads in esp32-detections...")
     try:
         bucket_files = list_all_bucket_files("esp32-detections")
-        print(f"  Found {len(bucket_files)} file(s) in esp32-detections bucket.")
         
         for file_path in bucket_files:
             # Check if this file path is already in the database queue
             q_res = supabase.table("processing_queue").select("id").eq("image_path", file_path).execute()
             
             if len(q_res.data) == 0:
-                print(f"  New upload detected: {file_path}. Queuing...")
+                print(f"[Watcher] New upload detected: {file_path}. Queuing...")
                 supabase.table("processing_queue").insert({
                     "image_path": file_path,
                     "status": "queued",
@@ -202,30 +216,38 @@ def get_ist_now():
 def check_entry_time(detection_time_iso):
     """
     Parses detection time and converts it to IST (UTC+5:30).
-    Returns (is_late, ist_time_str)
-    College start time: 9:00 AM
-    College end time: 3:30 PM
+    Checks against dynamically configured college timings (cutoff + grace period).
+    Returns (is_late, ist_time_str, disp_cutoff)
     """
+    timings = get_college_timings()
+    cutoff_str = timings.get("late_arrival_cutoff", "09:00")
+    grace_mins = int(timings.get("grace_period_mins", 0))
+    
+    try:
+        c_hour, c_min = map(int, cutoff_str.split(":"))
+    except Exception:
+        c_hour, c_min = 9, 0
+        
+    cutoff_total_mins = c_hour * 60 + c_min + grace_mins
+    
     try:
         t_str = detection_time_iso.replace("Z", "+00:00")
         dt_utc = datetime.datetime.fromisoformat(t_str)
         ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
         dt_ist = dt_utc.astimezone(ist_tz)
-        hour = dt_ist.hour
-        minute = dt_ist.minute
-        # Permitted entry is up to 9:00 AM.
-        # Late if after 9:00 AM
-        is_late = (hour > 9) or (hour == 9 and minute > 0)
-        ist_time_str = dt_ist.strftime("%I:%M %p")
-        return is_late, ist_time_str
     except Exception as e:
         print(f"[Time Check] Error parsing detection time {detection_time_iso}: {e}")
-        # Fallback to current local time
         dt_ist = get_ist_now()
-        hour = dt_ist.hour
-        minute = dt_ist.minute
-        is_late = (hour > 9) or (hour == 9 and minute > 0)
-        return is_late, dt_ist.strftime("%I:%M %p")
+        
+    entry_total_mins = dt_ist.hour * 60 + dt_ist.minute
+    is_late = entry_total_mins > cutoff_total_mins
+    ist_time_str = dt_ist.strftime("%I:%M %p")
+    
+    am_pm = "AM" if c_hour < 12 else "PM"
+    disp_hour = c_hour if 1 <= c_hour <= 12 else (c_hour - 12 if c_hour > 12 else 12)
+    disp_cutoff = f"{disp_hour:02d}:{c_min:02d} {am_pm}"
+    
+    return is_late, ist_time_str, disp_cutoff
 
 def send_student_notification_email(student_email, student_name, reason, detection_time_str):
     if not student_email:
@@ -325,10 +347,6 @@ def send_student_notification_email(student_email, student_name, reason, detecti
                       <td style="padding: 12px 16px; font-size: 13px; color: #0f172a; border-bottom: 1px solid #f1f5f9;">{detection_time_str} IST</td>
                     </tr>
                     <tr>
-                      <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #334155; border-bottom: 1px solid #f1f5f9;">Campus Hours</td>
-                      <td style="padding: 12px 16px; font-size: 13px; color: #0f172a; border-bottom: 1px solid #f1f5f9;">09:00 AM - 03:30 PM</td>
-                    </tr>
-                    <tr>
                       <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #334155; vertical-align: top;">Infraction Sighted</td>
                       <td style="padding: 12px 16px; font-size: 13px; color: #ef4444; font-weight: 600; line-height: 1.4;">
                         {reason}
@@ -336,12 +354,10 @@ def send_student_notification_email(student_email, student_name, reason, detecti
                     </tr>
                   </table>
 
-                  <!-- Guideline Section -->
-                  <h3 style="font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 24px; margin-bottom: 12px;">Official Campus Regulations</h3>
+                  <h3 style="font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 24px; margin-bottom: 12px;">Campus Regulations</h3>
                   <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #475569; line-height: 1.6;">
-                    <li style="margin-bottom: 8px;">Every student must visibly wear their official department branch ID card (with the correct branch color lanyard) at all times when entering and navigating the campus.</li>
-                    <li style="margin-bottom: 8px;">Official class hours begin at <strong>9:00 AM</strong>. Arriving after this time is classified as a late entry infraction.</li>
-                    <li style="margin-bottom: 8px;">Consistent failure to comply with ID card and arrival policies will be escalated to department heads and coordinators.</li>
+                    <li style="margin-bottom: 8px;">Every student must visibly wear their official department branch ID card (with the designated branch color lanyard) at all times when entering the campus.</li>
+                    <li style="margin-bottom: 8px;">Entering campus after the late cutoff window is flagged as a late entry violation.</li>
                   </ul>
                 </td>
               </tr>
@@ -352,14 +368,7 @@ def send_student_notification_email(student_email, student_name, reason, detecti
                   <table width="100%" border="0" cellspacing="0" cellpadding="0">
                     <tr>
                       <td style="font-size: 11px; line-height: 1.5; color: #94a3b8; font-family: sans-serif;">
-                        <strong>Department of Information Science and Engineering</strong><br />
-                        Global Academy of Technology (GAT)<br />
-                        Rajajinagar, Bengaluru, Karnataka, India
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding-top: 16px; font-size: 10px; color: #cbd5e1; font-family: sans-serif; text-align: center;">
-                        This is an automated notification. Please do not reply directly to this email.
+                        <strong>Qevrix Guardian Automated Discipline Monitor</strong>
                       </td>
                     </tr>
                   </table>
@@ -414,9 +423,9 @@ def process_single_queue_item(item):
         print(f"  Running AI processing pipeline...")
         result = run_pipeline(temp_img_path, student_embeddings)
         
-        if result is None:
-            # Person not detected: skip logging a detections row, mark done
-            print("  No person detected. Discarding frame without logging detection record.")
+        # Check if a person was present
+        if not result.get("person_detected"):
+            print("  No person detected in frame. Discarding empty frame without logging false detection record.")
             supabase.table("processing_queue").update({
                 "status": "done",
                 "finished_at": get_now_utc()
@@ -428,42 +437,55 @@ def process_single_queue_item(item):
         student_name = None
         branch_id = None
         expected_branch_color = None
+        branch_color_name = None
         color_match = None
         student_email = None
+        is_pending = False
         
         if matched_student_id is not None:
-            # Get student and branch details
             s_details = student_info.get(matched_student_id)
             if s_details:
                 student_name = s_details["full_name"]
                 branch_id = s_details["branch_id"]
                 student_email = s_details.get("email")
+                is_pending = (s_details.get("status") == "pending_approval")
                 
                 if branch_id and branch_id in branch_cache:
-                    expected_branch_color = branch_cache[branch_id]["color_hex"]
+                    expected_branch_color = branch_cache[branch_id].get("color_hex")
+                    branch_color_name = branch_cache[branch_id].get("color_name")
                     
-        # Perform branch color check if ID card and expected color are present
+        # Perform intelligent branch color check if ID card and expected color are present
         if result["id_card_found"] and expected_branch_color:
-            color_match = result["id_card_color"] == expected_branch_color
+            color_match = is_color_match(
+                detected_hex=result["id_card_color"],
+                detected_name=result.get("id_card_color_name"),
+                expected_hex=expected_branch_color,
+                expected_name=branch_color_name
+            )
             
-        # Check time bounds
+        # Check arrival time against configured college timings
         detection_time_str = get_now_utc()
-        is_late, ist_time_str = check_entry_time(detection_time_str)
+        is_late, ist_time_str, disp_cutoff = check_entry_time(detection_time_str)
         
         # 4. Resolve status
-        # If student is matched, ID card matches branch color, AND they are in-time, status is verified.
-        # Otherwise (missing ID, mismatched color, or late entry) it is flagged.
         status = "flagged"
-        if matched_student_id is not None and result["id_card_found"] and color_match is True and not is_late:
-            status = "verified"
+        if matched_student_id is not None:
+            if not is_pending and result["id_card_found"] and color_match is True and not is_late:
+                status = "verified"
+        else:
+            status = "unknown" if result["id_card_found"] else "flagged"
             
-        # Send email if recognized student violates ID card requirement or entry time bounds
+        # Send email if recognized student violates ID card requirement, color, or entry time bounds
         if matched_student_id is not None and student_email:
             reasons = []
+            if is_pending:
+                reasons.append("Student enrollment pending approval")
             if not result["id_card_found"]:
                 reasons.append("Missing ID card (not worn)")
+            elif color_match is False:
+                reasons.append(f"Branch color mismatch (detected: {result.get('id_card_color_name', 'Unknown')}, expected: {branch_color_name})")
             if is_late:
-                reasons.append(f"Late entry (entered at {ist_time_str}, after class start time of 9:00 AM)")
+                reasons.append(f"Late entry (entered at {ist_time_str}, after cutoff of {disp_cutoff})")
                 
             if reasons:
                 reason_text = " and ".join(reasons)
@@ -474,8 +496,8 @@ def process_single_queue_item(item):
                     detection_time_str=ist_time_str
                 )
             
-        # 5. Insert exactly ONE completed row into detections table using upsert to avoid duplicates
-        print(f"  Inserting completed detection log into database (status: {status})...")
+        # 5. Insert completed detection log into database
+        print(f"  Inserting completed detection log into database (student: {student_name}, status: {status}, color_match: {color_match})...")
         try:
             supabase.table("detections").upsert({
                 "student_id": matched_student_id,
@@ -490,6 +512,7 @@ def process_single_queue_item(item):
                 "confidence": result["confidence"],
                 "status": status,
                 "detection_time": detection_time_str,
+                "recognized": matched_student_id is not None,
                 "notification_sent": False
             }, on_conflict="image_url").execute()
         except Exception as upsert_err:
@@ -533,7 +556,6 @@ def process_queue():
     Claims and processes the oldest queued or retryable failed item.
     """
     try:
-        # Query oldest item that is queued or failed but within retries limit
         q_res = supabase.table("processing_queue") \
             .select("*") \
             .or_(f"status.eq.queued,and(status.eq.failed,retry_count.lt.{MAX_RETRIES})") \
@@ -558,7 +580,7 @@ def process_queue():
                 
             if len(claim_res.data) > 0:
                 process_single_queue_item(claim_res.data[0])
-                return True # Handled an item
+                return True
                 
     except Exception as e:
         print(f"Error querying/processing queue: {e}")
@@ -594,7 +616,6 @@ def main():
                 last_reconciliation_time = current_time
                 
             # Sleep until next poll
-            print(f"[Daemon] Queue idle. Sleeping for {POLL_INTERVAL} seconds...")
             time.sleep(POLL_INTERVAL)
             
         except KeyboardInterrupt:

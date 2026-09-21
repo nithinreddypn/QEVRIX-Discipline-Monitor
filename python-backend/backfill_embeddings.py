@@ -4,6 +4,26 @@ import numpy as np
 from supabase import create_client
 from pipeline import detect_face, get_face_embedding
 
+def load_env():
+    try:
+        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip('"').strip("'")
+                        os.environ[key] = val
+            print(f"[Env] Successfully loaded environment variables from {env_path}")
+    except Exception as e:
+        print(f"[Env Loader] Warning: Could not load .env file: {e}")
+
+load_env()
+
 # Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -21,11 +41,11 @@ def run_backfill():
     # Initialize Supabase client
     supabase = create_client(SUPABASE_URL, SERVICE_KEY)
     
-    print("[Backfill] Fetching active student records...")
+    print("[Backfill] Fetching registered student records with profile photos...")
     try:
-        s_res = supabase.table("students").select("id, full_name, profile_photo_url").eq("status", "active").execute()
+        s_res = supabase.table("students").select("id, full_name, profile_photo_url, status").in_("status", ["active", "pending_approval"]).execute()
         students = s_res.data
-        print(f"  Found {len(students)} active student records.")
+        print(f"  Found {len(students)} student record(s).")
         
         success_count = 0
         for student in students:
@@ -36,7 +56,7 @@ def run_backfill():
                 print(f"  [Skipped] Student {student['full_name']} has no profile photo.")
                 continue
                 
-            print(f"  Processing student {student['full_name']} (Photo: {photo_url})...")
+            print(f"  Processing student {student['full_name']} (Status: {student['status']}, Photo: {photo_url})...")
             temp_filename = f"temp_backfill_{student_id}.jpg"
             
             try:

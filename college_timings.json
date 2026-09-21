@@ -1,0 +1,42 @@
+{
+  "college_start": "08:30",
+  "late_threshold": "09:00",
+  "college_end": "16:30",
+  "working_days": [
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri"
+  ],
+  "breaks": [
+    {
+      "id": "morning_break",
+      "name": "Morning Break",
+      "start_time": "11:00",
+      "end_time": "11:15",
+      "enabled": true,
+      "allow_movement": true
+    },
+    {
+      "id": "lunch_break",
+      "name": "Lunch Break",
+      "start_time": "13:00",
+      "end_time": "14:00",
+      "enabled": true,
+      "allow_movement": true
+    },
+    {
+      "id": "evening_break",
+      "name": "Evening Break",
+      "start_time": "15:30",
+      "end_time": "15:45",
+      "enabled": false,
+      "allow_movement": true
+    }
+  ],
+  "allow_break_movement": true,
+  "flag_lecture_hours": true,
+  "updated_at": "2026-09-21T04:10:00.000Z",
+  "branch_schedules": {}
+}
