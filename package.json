@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "start": "vite preview",
     "preview": "vite preview",
+    "worker": "python -u python-backend/main.py",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

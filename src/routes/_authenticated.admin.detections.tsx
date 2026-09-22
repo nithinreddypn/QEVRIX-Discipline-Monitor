@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { StatusBadge, YesNoBadge } from "@/components/student/StatusBadge";
+import { usePhotoUrl } from "@/lib/photo";
 
 export const Route = createFileRoute("/_authenticated/admin/detections")({
   head: () => ({
@@ -45,7 +46,71 @@ type Row = {
   students: { usn: string | null } | null;
   is_repeat: boolean | null;
   repeat_count: number | null;
+  image_url: string | null;
 };
+
+function DetectionThumbnail({
+  imageUrl,
+  studentName,
+  onEnlarge,
+}: {
+  imageUrl?: string | null;
+  studentName?: string | null;
+  onEnlarge?: (url: string) => void;
+}) {
+  const signed = usePhotoUrl(imageUrl, "esp32-detections");
+
+  if (!imageUrl) {
+    return (
+      <div className="grid h-10 w-10 place-items-center rounded-lg bg-secondary/80 text-muted-foreground/50 border border-border">
+        <Camera className="h-4 w-4" />
+      </div>
+    );
+  }
+
+  if (signed.isLoading) {
+    return (
+      <div className="h-10 w-10 animate-pulse rounded-lg bg-secondary/80 border border-border flex items-center justify-center">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!signed.data) {
+    return (
+      <div
+        className="grid h-10 w-10 place-items-center rounded-lg bg-secondary/80 text-muted-foreground/50 border border-border"
+        title="Photo unavailable"
+      >
+        <Camera className="h-4 w-4" />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onEnlarge && signed.data) {
+          onEnlarge(signed.data);
+        }
+      }}
+      className="relative group/thumb h-11 w-11 overflow-hidden rounded-lg border border-border bg-black/10 shrink-0 transition hover:ring-2 hover:ring-primary/60 focus:outline-none"
+      title="Click to view full photo"
+    >
+      <img
+        src={signed.data}
+        alt={studentName ?? "Detection frame"}
+        className="h-full w-full object-cover transition-transform duration-200 group-hover/thumb:scale-110"
+        loading="lazy"
+      />
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+        <Eye className="h-4 w-4 drop-shadow" />
+      </div>
+    </button>
+  );
+}
 
 const STATUSES = ["all", "verified", "flagged", "pending", "unknown"] as const;
 
@@ -123,6 +188,71 @@ function DetectionsPage() {
   const [analysisResult, setAnalysisResult] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Quick Photo Preview Modal state
+  const [previewModal, setPreviewModal] = useState<{
+    url: string;
+    studentName: string;
+    time: string;
+    status: string;
+    id: string;
+  } | null>(null);
+
+  // Sync bucket state
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  async function handleSyncBucket() {
+    setIsSyncing(true);
+    try {
+      // 1. Scan esp32-detections storage bucket
+      const { data: files, error: listError } = await supabase.storage
+        .from("esp32-detections")
+        .list("", { limit: 100, sortBy: { column: "name", order: "desc" } });
+
+      if (listError) {
+        throw new Error(`Storage query failed: ${listError.message}`);
+      }
+
+      const validFiles = (files || []).filter(
+        (f) => f.name && !f.name.startsWith(".") && (f.name.endsWith(".jpg") || f.name.endsWith(".jpeg") || f.name.endsWith(".png"))
+      );
+
+      if (validFiles.length === 0) {
+        toast.info("No images found in esp32-detections storage bucket.");
+        return;
+      }
+
+      // 2. Fetch already queued paths
+      const { data: qData } = await (supabase.from as any)("processing_queue").select("image_path");
+      const queuedPaths = new Set((qData || []).map((q: any) => q.image_path));
+
+      // 3. Queue unqueued files
+      const toQueue = validFiles
+        .filter((f) => !queuedPaths.has(f.name))
+        .map((f) => ({
+          image_path: f.name,
+          status: "queued",
+          retry_count: 0,
+        }));
+
+      if (toQueue.length > 0) {
+        const { error: insertErr } = await (supabase.from as any)("processing_queue").insert(toQueue);
+        if (insertErr) {
+          throw new Error(`Queue insert failed: ${insertErr.message}`);
+        }
+        toast.success(`Queued ${toQueue.length} new camera frame(s) for AI processing.`);
+      } else {
+        toast.info(`All ${validFiles.length} storage images are queued or processed.`);
+      }
+
+      // Invalidate detection list query to pull latest processed rows
+      qc.invalidateQueries({ queryKey: ["admin-detections"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to sync camera bucket.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
   const branches = useQuery({
     queryKey: ["branches-lite"],
     queryFn: async (): Promise<Branch[]> => {
@@ -136,7 +266,7 @@ function DetectionsPage() {
     queryFn: async (): Promise<Row[]> => {
       const { data } = await supabase
         .from("detections")
-        .select("id, detection_time, id_card_found, status, student_name, branch_id, branches(code, name), students(usn), is_repeat, repeat_count")
+        .select("id, detection_time, id_card_found, status, student_name, branch_id, branches(code, name), students(usn), is_repeat, repeat_count, image_url")
         .order("detection_time", { ascending: false })
         .limit(2000);
       return (data as unknown as Row[] | null) ?? [];
@@ -301,6 +431,16 @@ function DetectionsPage() {
           <p className="mt-1 text-sm text-muted-foreground">Every detection captured across the institution.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSyncBucket}
+            disabled={isSyncing}
+            className="btn-ghost text-sm inline-flex items-center gap-1.5 border border-border hover:bg-secondary disabled:opacity-50"
+            title="Scan esp32-detections bucket and queue any unprocessed uploads"
+          >
+            <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin text-primary" : "text-muted-foreground"}`} />
+            {isSyncing ? "Syncing Bucket…" : "Sync Camera Bucket"}
+          </button>
           <button
             onClick={() => {
               setSelectedFile(null);
@@ -482,13 +622,15 @@ function DetectionsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-border bg-secondary/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 <tr>
-                  <th className="px-6 py-3">Date</th>
-                  <th className="px-6 py-3">Time</th>
-                  <th className="px-6 py-3">Student</th>
-                  <th className="px-6 py-3">USN</th>
-                  <th className="px-6 py-3">Branch</th>
-                  <th className="px-6 py-3">ID</th>
-                  <th className="px-6 py-3">Status</th>
+                  <th className="px-5 py-3 text-left">Photo</th>
+                  <th className="px-5 py-3">Date</th>
+                  <th className="px-5 py-3">Time</th>
+                  <th className="px-5 py-3">Student</th>
+                  <th className="px-5 py-3">USN</th>
+                  <th className="px-5 py-3">Branch</th>
+                  <th className="px-5 py-3">ID Card</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border bg-card">
@@ -498,15 +640,30 @@ function DetectionsPage() {
                     <tr
                       key={r.id}
                       onClick={() => navigate({ to: "/detections/$id", params: { id: r.id } })}
-                      className="cursor-pointer hover:bg-secondary/30 transition-colors"
+                      className="cursor-pointer hover:bg-secondary/30 transition-colors group/row"
                     >
-                      <td className="whitespace-nowrap px-6 py-3.5 font-medium text-foreground">
+                      <td className="whitespace-nowrap px-5 py-2.5">
+                        <DetectionThumbnail
+                          imageUrl={r.image_url}
+                          studentName={r.student_name}
+                          onEnlarge={(url) =>
+                            setPreviewModal({
+                              url,
+                              studentName: r.student_name ?? "Unidentified Person",
+                              time: `${d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })} at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+                              status: r.status ?? "unknown",
+                              id: r.id,
+                            })
+                          }
+                        />
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-3 font-medium text-foreground">
                         {d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
                       </td>
-                      <td className="whitespace-nowrap px-6 py-3.5 text-muted-foreground">
+                      <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
                         {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </td>
-                      <td className="whitespace-nowrap px-6 py-3.5 text-foreground flex items-center gap-2">
+                      <td className="whitespace-nowrap px-5 py-3 text-foreground flex items-center gap-2">
                         <span className="font-semibold">{r.student_name ?? "Unknown"}</span>
                         {r.is_repeat && (
                           <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
@@ -514,10 +671,22 @@ function DetectionsPage() {
                           </span>
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-6 py-3.5 font-mono text-xs text-muted-foreground">{r.students?.usn ?? "—"}</td>
-                      <td className="whitespace-nowrap px-6 py-3.5 text-muted-foreground">{r.branches?.code ?? "—"}</td>
-                      <td className="whitespace-nowrap px-6 py-3.5"><YesNoBadge yes={r.id_card_found} /></td>
-                      <td className="whitespace-nowrap px-6 py-3.5"><StatusBadge status={r.status} /></td>
+                      <td className="whitespace-nowrap px-5 py-3 font-mono text-xs text-muted-foreground">{r.students?.usn ?? "—"}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">{r.branches?.code ?? "—"}</td>
+                      <td className="whitespace-nowrap px-5 py-3"><YesNoBadge yes={r.id_card_found} /></td>
+                      <td className="whitespace-nowrap px-5 py-3"><StatusBadge status={r.status} /></td>
+                      <td className="whitespace-nowrap px-5 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate({ to: "/detections/$id", params: { id: r.id } });
+                          }}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition px-2.5 py-1 rounded-lg border border-primary/20 hover:bg-primary/10"
+                        >
+                          Details →
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -527,6 +696,71 @@ function DetectionsPage() {
         )}
       </div>
       <p className="text-xs text-muted-foreground">Showing {filtered.length} of {rows.data?.length ?? 0} records.</p>
+
+      {/* Captured Image Quick-View Modal */}
+      {previewModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setPreviewModal(null)}
+        >
+          <div
+            className="relative w-full max-w-xl rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <Camera className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold">{previewModal.studentName}</h3>
+                  <p className="text-xs text-muted-foreground">{previewModal.time}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <StatusBadge status={previewModal.status} />
+                <button
+                  type="button"
+                  onClick={() => setPreviewModal(null)}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="relative rounded-xl border border-border overflow-hidden bg-black/95 flex items-center justify-center min-h-[280px] max-h-[480px]">
+              <img
+                src={previewModal.url}
+                alt="Captured frame"
+                className="w-full h-auto max-h-[480px] object-contain"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <a
+                href={previewModal.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 underline"
+              >
+                Open full image in new tab ↗
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = previewModal.id;
+                  setPreviewModal(null);
+                  navigate({ to: "/detections/$id", params: { id } });
+                }}
+                className="btn-primary text-xs py-2 px-3 inline-flex items-center gap-1.5"
+              >
+                View Full Detection Report →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Test AI Detection Modal */}
       {testModalOpen && (
