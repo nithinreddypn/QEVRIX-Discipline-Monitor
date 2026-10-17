@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { validatePasswordPolicy } from "./utils";
 
 type ServerRole = "student" | "teacher" | "admin";
 type Caller = { userId: string; roles: ServerRole[] };
@@ -733,29 +734,6 @@ export const fetchPendingStudents = createServerFn({ method: "GET" })
 
     return data ?? [];
   });
-
-/**
- * Creates or updates a teacher record along with their Supabase Auth login credentials.
- * Ensures the teacher can log in immediately upon creation.
- */
-export function validatePasswordPolicy(password: string): string | null {
-  if (!password || password.length < 8) {
-    return "Password must be at least 8 characters long.";
-  }
-  if (!/[a-z]/.test(password)) {
-    return "Password must contain at least one lowercase letter (a-z).";
-  }
-  if (!/[A-Z]/.test(password)) {
-    return "Password must contain at least one uppercase letter (A-Z).";
-  }
-  if (!/\d/.test(password)) {
-    return "Password must contain at least one number (0-9).";
-  }
-  if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password)) {
-    return "Password must contain at least one special symbol (!@#$%^&*...).";
-  }
-  return null;
-}
 
 /**
  * Creates or updates a teacher record and sets up their Supabase login account.

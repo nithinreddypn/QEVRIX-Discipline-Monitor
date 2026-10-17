@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { getFriendlyErrorMessage } from "@/lib/utils";
 import { AuthLayout } from "@/components/layouts/AuthLayout";
+import { registerTeacherAccount } from "@/lib/email";
 
 export const Route = createFileRoute("/signup")({
   head: () => ({
@@ -152,7 +153,6 @@ function SignupPage() {
     setLoading(true);
 
     try {
-      const { registerTeacherAccount } = await import("@/lib/email");
       await registerTeacherAccount({
         data: {
           fullName: fullName.trim(),
