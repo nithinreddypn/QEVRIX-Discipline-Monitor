@@ -150,12 +150,33 @@ function TeachersPage() {
   });
 
   function generatePassword() {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-    let pass = "";
-    for (let i = 0; i < 10; i++) {
-      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    const uppers = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const lowers = "abcdefghijkmnopqrstuvwxyz";
+    const numbers = "23456789";
+    const symbols = "!@#$%^&*()_+=";
+    const all = uppers + lowers + numbers + symbols;
+
+    const chars = [
+      uppers[Math.floor(Math.random() * uppers.length)],
+      uppers[Math.floor(Math.random() * uppers.length)],
+      lowers[Math.floor(Math.random() * lowers.length)],
+      lowers[Math.floor(Math.random() * lowers.length)],
+      numbers[Math.floor(Math.random() * numbers.length)],
+      numbers[Math.floor(Math.random() * numbers.length)],
+      symbols[Math.floor(Math.random() * symbols.length)],
+      symbols[Math.floor(Math.random() * symbols.length)],
+    ];
+
+    while (chars.length < 12) {
+      chars.push(all[Math.floor(Math.random() * all.length)]);
     }
-    return pass;
+
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+
+    return chars.join("");
   }
 
   function openCreate() {
@@ -331,7 +352,7 @@ function TeachersPage() {
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 className={inputCls}
-                placeholder={editing ? "Leave blank to keep existing password" : "At least 6 characters"}
+                placeholder={editing ? "Leave blank to keep existing password" : "At least 8 characters (with uppercase, number, symbol)"}
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {editing
@@ -346,7 +367,7 @@ function TeachersPage() {
           <DialogFooter>
             <button onClick={() => { setEditing(null); setCreating(false); }} className="btn-ghost text-sm">Cancel</button>
             <button
-              disabled={upsert.isPending || !form.full_name || !form.branch_id || !form.email || (!editing && (!form.password || form.password.length < 6))}
+              disabled={upsert.isPending || !form.full_name || !form.branch_id || !form.email || (!editing && (!form.password || form.password.length < 8))}
               onClick={() => upsert.mutate(editing ? { ...form, id: editing.id } : form)}
               className="btn-primary text-sm disabled:opacity-50"
             >

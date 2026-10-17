@@ -29,7 +29,7 @@ const rules: Rule[] = [
   { label: "One uppercase letter", test: (p) => /[A-Z]/.test(p) },
   { label: "One lowercase letter", test: (p) => /[a-z]/.test(p) },
   { label: "One number", test: (p) => /\d/.test(p) },
-  { label: "One symbol (!@#$…)", test: (p) => /[^A-Za-z0-9]/.test(p) },
+  { label: "One symbol (!@#$%^&*...)", test: (p) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(p) },
 ];
 
 /** USN must start with 1GA, followed by 2-digit year, 2-3 letter branch code, 3-digit roll number. e.g. 1GA22IS001 or 1GA22ISE001 */
@@ -89,7 +89,7 @@ function SignupPage() {
     const uppers = "ABCDEFGHJKLMNPQRSTUVWXYZ";
     const lowers = "abcdefghijkmnopqrstuvwxyz";
     const numbers = "23456789";
-    const symbols = "!@#$%^&*()_+";
+    const symbols = "!@#$%^&*()_+=";
     const all = uppers + lowers + numbers + symbols;
 
     const chars = [
@@ -151,56 +151,38 @@ function SignupPage() {
     }
     setLoading(true);
 
-    // Sign up the user. All user details are stored in raw_user_meta_data so the SECURITY DEFINER database trigger
-    // can create their student/teacher record securely on the backend (even if their email is unconfirmed).
-    const { data: signUpData, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: {
-          full_name: fullName,
-          role,
-          phone: phone || null,
-          branch_id: branchId || null,
-          usn: null,
-          semester: null,
-          profile_photo_path: null,
-        },
-      },
-    });
-
-    if (error || !signUpData.user) {
-      setLoading(false);
-      const friendly = getFriendlyErrorMessage(error);
-      toast.error(friendly);
-      return;
-    }
-
-    // Create the student/teacher record on the server using service role key.
-    // This is more reliable than the database trigger which may not be configured.
     try {
-      const { createStudentRecord } = await import("@/lib/email");
-      await createStudentRecord({
+      const { registerTeacherAccount } = await import("@/lib/email");
+      await registerTeacherAccount({
         data: {
-          userId: signUpData.user.id,
-          email,
-          fullName,
-          role,
-          usn: undefined,
-          branchId: branchId || undefined,
-          semester: undefined,
-          phone: phone || undefined,
-        }
+          fullName: fullName.trim(),
+          email: email.trim(),
+          password,
+          phone: phone.trim() || undefined,
+          branchId,
+        },
       });
-    } catch (recordErr) {
-      console.error("[Signup] Failed to create record via server:", recordErr);
-      // Don't block signup — the trigger might have created the record
-    }
 
-    setLoading(false);
-    toast.success("Registration successful! Verification email sent.");
-    setSignUpSuccessEmail(email);
+      // Sign the user in automatically with their confirmed credentials
+      const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      setLoading(false);
+
+      if (!signInErr && signInData?.session) {
+        toast.success("Account created successfully! Welcome to QEVRIX.");
+        navigate({ to: "/teacher/dashboard", replace: true });
+      } else {
+        toast.success("Teacher account created successfully! You can now log in.");
+        setSignUpSuccessEmail(email);
+      }
+    } catch (err: any) {
+      setLoading(false);
+      const friendly = getFriendlyErrorMessage(err);
+      toast.error(friendly);
+    }
   }
 
   return (
@@ -240,14 +222,12 @@ function SignupPage() {
               <Check className="h-8 w-8" />
             </div>
             <div className="space-y-2">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">Registration Submitted</h2>
+              <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">Account Created Successfully</h2>
               <p className="text-sm text-muted-foreground">
-                Your request has been successfully received for <strong className="text-foreground">{signUpSuccessEmail}</strong>.
+                Your teacher account has been created for <strong className="text-foreground">{signUpSuccessEmail}</strong>.
               </p>
               <p className="text-xs text-muted-foreground/80 leading-relaxed max-w-sm mx-auto">
-                {role === "student"
-                  ? "Your request has been forwarded to the department branch teachers for approval. You will be able to log in once your profile is verified."
-                  : "Your request has been forwarded to the administrators for approval. You will be able to log in once your profile is approved."}
+                Your credentials are active. You can now log in to access the QEVRIX dashboard.
               </p>
             </div>
             <div className="pt-4">
