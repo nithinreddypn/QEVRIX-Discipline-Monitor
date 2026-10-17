@@ -31,6 +31,15 @@ export function getFriendlyErrorMessage(error: any, fallback = "An unexpected er
     return "Incorrect email or password. Please verify your details and try again.";
   }
   if (
+    message.includes("Password should contain") ||
+    message.includes("Password is too weak") ||
+    message.includes("password must contain") ||
+    message.includes("password should have") ||
+    message.includes("Password does not meet")
+  ) {
+    return "Password does not meet security requirements. It must include at least 8 characters, an uppercase letter, a lowercase letter, a number, and a symbol (!@#$%).";
+  }
+  if (
     message.includes("Failed to fetch") ||
     message.includes("ERR_INTERNET_DISCONNECTED") ||
     message.includes("NetworkError") ||

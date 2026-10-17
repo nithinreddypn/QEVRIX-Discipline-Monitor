@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { getFriendlyErrorMessage } from "@/lib/utils";
 import { AuthLayout } from "@/components/layouts/AuthLayout";
 
 export const Route = createFileRoute("/signup")({
@@ -84,8 +85,42 @@ function SignupPage() {
     }
   }, [usnBranchCode, branches.data, role]);
 
+  function generateStrongPassword() {
+    const uppers = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const lowers = "abcdefghijkmnopqrstuvwxyz";
+    const numbers = "23456789";
+    const symbols = "!@#$%^&*()_+";
+    const all = uppers + lowers + numbers + symbols;
+
+    const chars = [
+      uppers[Math.floor(Math.random() * uppers.length)],
+      uppers[Math.floor(Math.random() * uppers.length)],
+      lowers[Math.floor(Math.random() * lowers.length)],
+      lowers[Math.floor(Math.random() * lowers.length)],
+      numbers[Math.floor(Math.random() * numbers.length)],
+      numbers[Math.floor(Math.random() * numbers.length)],
+      symbols[Math.floor(Math.random() * symbols.length)],
+      symbols[Math.floor(Math.random() * symbols.length)],
+    ];
+
+    while (chars.length < 14) {
+      chars.push(all[Math.floor(Math.random() * all.length)]);
+    }
+
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+
+    const pass = chars.join("");
+    setPassword(pass);
+    setConfirm(pass);
+    toast.success("Generated strong policy-compliant password!");
+  }
+
   const passed = useMemo(() => rules.map((r) => r.test(password)), [password]);
   const score = passed.filter(Boolean).length;
+  const allRulesPassed = score === rules.length;
   const strengthColor = [
     "bg-muted", "bg-destructive/70", "bg-amber-500",
     "bg-amber-400", "bg-primary/80", "bg-primary",
@@ -94,7 +129,7 @@ function SignupPage() {
   const matches = confirm.length > 0 && confirm === password;
   const usnValid = isValidUsn(usn);
   const baseValid =
-    score >= 4 && matches && accepted && !loading &&
+    allRulesPassed && matches && accepted && !loading &&
     fullName.trim() && email.trim() && branchId;
   const canSubmit = role === "student"
     ? baseValid && usnValid && semester
@@ -107,7 +142,9 @@ function SignupPage() {
       return;
     }
     if (!canSubmit) {
-      if (score < 4) return toast.error("Please choose a stronger password");
+      if (!allRulesPassed) {
+        return toast.error("Password must satisfy all 5 requirements below (including uppercase, number, and a symbol).");
+      }
       if (!matches) return toast.error("Passwords do not match");
       if (!accepted) return toast.error("Please accept the Terms and Privacy Policy");
       return toast.error("Please fill in all required fields");
@@ -135,7 +172,8 @@ function SignupPage() {
 
     if (error || !signUpData.user) {
       setLoading(false);
-      toast.error(error?.message ?? "Sign up failed");
+      const friendly = getFriendlyErrorMessage(error);
+      toast.error(friendly);
       return;
     }
 
@@ -287,7 +325,21 @@ function SignupPage() {
 
               {/* Passwords */}
               <div className="grid gap-4 sm:grid-cols-2">
-                <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" />
+                <PasswordField
+                  label="Password"
+                  labelAction={
+                    <button
+                      type="button"
+                      onClick={generateStrongPassword}
+                      className="text-[11px] font-medium text-primary hover:underline"
+                    >
+                      Generate strong
+                    </button>
+                  }
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete="new-password"
+                />
                 <PasswordField label="Confirm password" value={confirm} onChange={setConfirm} autoComplete="new-password" />
               </div>
 
@@ -424,14 +476,17 @@ function IconField({
 }
 
 function PasswordField({
-  label, value, onChange, autoComplete,
+  label, labelAction, value, onChange, autoComplete,
 }: {
-  label: string; value: string; onChange: (v: string) => void; autoComplete?: string;
+  label: string; labelAction?: React.ReactNode; value: string; onChange: (v: string) => void; autoComplete?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-foreground">{label}</span>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="block text-xs font-medium text-foreground">{label}</span>
+        {labelAction}
+      </div>
       <div className="relative flex items-stretch overflow-hidden rounded-md border border-input bg-card transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
         <span className="grid w-10 place-items-center text-muted-foreground">
           <KeyRound className="h-4 w-4" strokeWidth={1.9} />
