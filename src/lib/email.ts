@@ -641,13 +641,45 @@ export const createStudentRecord = createServerFn({ method: "POST" })
         console.log("[Server] Student record already exists");
       }
     } else if (data.role === "teacher") {
-      const { data: existingTeacher } = await supabaseAdmin
+      const { data: teacherByUser } = await supabaseAdmin
         .from("teachers")
         .select("id")
         .eq("user_id", data.userId)
-        .single();
+        .maybeSingle();
 
-      if (!existingTeacher) {
+      const { data: teacherByEmail } = !teacherByUser && data.email
+        ? await supabaseAdmin
+            .from("teachers")
+            .select("id")
+            .ilike("email", data.email.trim())
+            .maybeSingle()
+        : { data: null };
+
+      if (teacherByUser) {
+        await supabaseAdmin
+          .from("teachers")
+          .update({
+            full_name: data.fullName,
+            email: data.email,
+            phone: data.phone || null,
+            branch_id: data.branchId || null,
+            status: "active",
+          })
+          .eq("id", teacherByUser.id);
+        console.log("[Server] Existing teacher by user_id updated and activated");
+      } else if (teacherByEmail) {
+        await supabaseAdmin
+          .from("teachers")
+          .update({
+            user_id: data.userId,
+            full_name: data.fullName,
+            phone: data.phone || null,
+            branch_id: data.branchId || null,
+            status: "active",
+          })
+          .eq("id", teacherByEmail.id);
+        console.log("[Server] Existing teacher by email linked to auth user and activated");
+      } else {
         const { error: teacherErr } = await supabaseAdmin
           .from("teachers")
           .insert({
@@ -663,8 +695,6 @@ export const createStudentRecord = createServerFn({ method: "POST" })
           throw new Error(`Failed to create teacher record: ${teacherErr.message}`);
         }
         console.log("[Server] Teacher record created successfully");
-      } else {
-        console.log("[Server] Teacher record already exists");
       }
     }
 
@@ -703,3 +733,221 @@ export const fetchPendingStudents = createServerFn({ method: "GET" })
 
     return data ?? [];
   });
+
+/**
+ * Creates or updates a teacher record along with their Supabase Auth login credentials.
+ * Ensures the teacher can log in immediately upon creation.
+ * Restricted to administrators.
+ */
+export const adminCreateOrUpdateTeacher = createServerFn({ method: "POST" })
+  .validator((data: {
+    id?: string;
+    fullName: string;
+    email: string;
+    branchId: string;
+    phone?: string;
+    password?: string;
+  }) => {
+    if (!data.fullName?.trim()) throw new Error("Full name is required");
+    if (!data.email?.trim()) throw new Error("Email is required");
+    if (!data.branchId?.trim()) throw new Error("Branch / Department is required");
+    if (!data.id && (!data.password || data.password.length < 6)) {
+      throw new Error("Password of at least 6 characters is required for new teacher accounts");
+    }
+    return data;
+  })
+  .handler(async ({ data }) => {
+    const supabaseAdmin = await createAdminClient();
+    await requireRole(supabaseAdmin, ["admin"]);
+
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanName = data.fullName.trim();
+    let authUserId: string | null = null;
+
+    // 1. Check if an auth user already exists for this email
+    const { data: usersList, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    if (listErr) {
+      console.error("[AdminTeacher] Error listing users:", listErr);
+    }
+    const existingAuthUser = usersList?.users?.find(
+      (u) => u.email?.toLowerCase() === cleanEmail
+    );
+
+    if (existingAuthUser) {
+      authUserId = existingAuthUser.id;
+      // Update password and metadata if provided
+      const updateData: Record<string, any> = {
+        email_confirm: true,
+        user_metadata: {
+          full_name: cleanName,
+          role: "teacher",
+          branch_id: data.branchId,
+        },
+      };
+      if (data.password?.trim()) {
+        updateData.password = data.password.trim();
+      }
+      const { error: passErr } = await supabaseAdmin.auth.admin.updateUserById(authUserId, updateData);
+      if (passErr) console.warn("[AdminTeacher] Password/metadata update warning:", passErr);
+    } else if (data.password?.trim()) {
+      // Create new Supabase auth user
+      const { data: newAuth, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+        email: cleanEmail,
+        password: data.password.trim(),
+        email_confirm: true,
+        user_metadata: {
+          full_name: cleanName,
+          role: "teacher",
+          branch_id: data.branchId,
+        },
+      });
+      if (authErr) {
+        console.error("[AdminTeacher] Auth user creation failed:", authErr);
+        throw new Error(`Failed to create login account: ${authErr.message}`);
+      }
+      authUserId = newAuth.user.id;
+    }
+
+    if (authUserId) {
+      // 2. Ensure role is teacher in user_roles
+      const { data: roleRow } = await supabaseAdmin
+        .from("user_roles")
+        .select("id, role")
+        .eq("user_id", authUserId)
+        .maybeSingle();
+
+      if (!roleRow) {
+        await supabaseAdmin.from("user_roles").insert({
+          user_id: authUserId,
+          role: "teacher",
+        });
+      } else if (roleRow.role !== "teacher" && roleRow.role !== "admin") {
+        await supabaseAdmin.from("user_roles").update({ role: "teacher" }).eq("id", roleRow.id);
+      }
+
+      // 3. Ensure profile exists in public.profiles
+      await supabaseAdmin.from("profiles").upsert({
+        id: authUserId,
+        email: cleanEmail,
+        full_name: cleanName,
+        phone: data.phone?.trim() || null,
+      });
+    }
+
+    // 4. Upsert in public.teachers table
+    let teacherRowId = data.id;
+
+    if (teacherRowId) {
+      // Update by row ID
+      const updatePayload: Record<string, any> = {
+        full_name: cleanName,
+        email: cleanEmail,
+        phone: data.phone?.trim() || null,
+        branch_id: data.branchId,
+        status: "active",
+      };
+      if (authUserId) {
+        updatePayload.user_id = authUserId;
+      }
+      const { error: upErr } = await supabaseAdmin
+        .from("teachers")
+        .update(updatePayload)
+        .eq("id", teacherRowId);
+      if (upErr) throw new Error(upErr.message);
+    } else {
+      // Check if existing teacher row by user_id OR email exists
+      let existingRow: { id: string } | null = null;
+      if (authUserId) {
+        const { data: byUser } = await supabaseAdmin
+          .from("teachers")
+          .select("id")
+          .eq("user_id", authUserId)
+          .maybeSingle();
+        if (byUser) existingRow = byUser;
+      }
+
+      if (!existingRow) {
+        const { data: byEmail } = await supabaseAdmin
+          .from("teachers")
+          .select("id")
+          .ilike("email", cleanEmail)
+          .maybeSingle();
+        if (byEmail) existingRow = byEmail;
+      }
+
+      if (existingRow) {
+        teacherRowId = existingRow.id;
+        const updatePayload: Record<string, any> = {
+          full_name: cleanName,
+          email: cleanEmail,
+          phone: data.phone?.trim() || null,
+          branch_id: data.branchId,
+          status: "active",
+        };
+        if (authUserId) updatePayload.user_id = authUserId;
+        const { error: upErr } = await supabaseAdmin
+          .from("teachers")
+          .update(updatePayload)
+          .eq("id", teacherRowId);
+        if (upErr) throw new Error(upErr.message);
+      } else {
+        const { data: inserted, error: inErr } = await supabaseAdmin
+          .from("teachers")
+          .insert({
+            user_id: authUserId,
+            full_name: cleanName,
+            email: cleanEmail,
+            phone: data.phone?.trim() || null,
+            branch_id: data.branchId,
+            status: "active",
+          })
+          .select("id")
+          .single();
+        if (inErr) throw new Error(inErr.message);
+        teacherRowId = inserted.id;
+      }
+    }
+
+    return { success: true, teacherId: teacherRowId, userId: authUserId };
+  });
+
+/**
+ * Deletes a teacher and optionally removes their Supabase auth credentials.
+ * Restricted to administrators.
+ */
+export const adminDeleteTeacher = createServerFn({ method: "POST" })
+  .validator((data: { id: string }) => {
+    if (!data.id) throw new Error("Teacher ID is required");
+    return data;
+  })
+  .handler(async ({ data }) => {
+    const supabaseAdmin = await createAdminClient();
+    await requireRole(supabaseAdmin, ["admin"]);
+
+    const { data: teacher } = await supabaseAdmin
+      .from("teachers")
+      .select("id, user_id")
+      .eq("id", data.id)
+      .maybeSingle();
+
+    if (!teacher) return { success: true };
+
+    const { error: delErr } = await supabaseAdmin
+      .from("teachers")
+      .delete()
+      .eq("id", data.id);
+    if (delErr) throw new Error(delErr.message);
+
+    if (teacher.user_id) {
+      try {
+        await supabaseAdmin.from("user_roles").delete().eq("user_id", teacher.user_id);
+        await supabaseAdmin.from("profiles").delete().eq("id", teacher.user_id);
+        await supabaseAdmin.auth.admin.deleteUser(teacher.user_id);
+      } catch (authDelErr) {
+        console.warn("[AdminTeacher] Auth user deletion warning:", authDelErr);
+      }
+    }
+
+    return { success: true };
+  });
+

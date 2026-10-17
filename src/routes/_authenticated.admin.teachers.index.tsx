@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, UserRound, Eye } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfilePhoto } from "@/components/common/ProfilePhoto";
+import { adminCreateOrUpdateTeacher, adminDeleteTeacher } from "@/lib/email";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/_authenticated/admin/teachers/")({
 type Branch = { id: string; code: string; name: string };
 type Teacher = {
   id: string;
+  user_id?: string | null;
   full_name: string;
   email: string | null;
   phone: string | null;
@@ -68,7 +70,7 @@ function useTypewriterPlaceholder(placeholders: string[], speed = 80, delay = 15
   return text;
 }
 
-const emptyForm = { full_name: "", email: "", phone: "", branch_id: "" };
+const emptyForm = { full_name: "", email: "", phone: "", branch_id: "", password: "" };
 
 function TeachersPage() {
   const qc = useQueryClient();
@@ -96,7 +98,7 @@ function TeachersPage() {
     queryFn: async (): Promise<Teacher[]> => {
       const { data } = await supabase
         .from("teachers")
-        .select("id, full_name, email, phone, branch_id, profile_photo_url, branches(code, name)")
+        .select("id, user_id, full_name, email, phone, branch_id, profile_photo_url, branches(code, name)")
         .order("full_name");
       return (data as unknown as Teacher[] | null) ?? [];
     },
@@ -115,44 +117,53 @@ function TeachersPage() {
 
   const upsert = useMutation({
     mutationFn: async (payload: typeof emptyForm & { id?: string }) => {
-      const row = {
-        full_name: payload.full_name,
-        email: payload.email || null,
-        phone: payload.phone || null,
-        branch_id: payload.branch_id || null,
-      };
-      if (payload.id) {
-        const { error } = await supabase.from("teachers").update(row).eq("id", payload.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("teachers").insert(row);
-        if (error) throw error;
-      }
+      await adminCreateOrUpdateTeacher({
+        data: {
+          id: payload.id,
+          fullName: payload.full_name,
+          email: payload.email,
+          branchId: payload.branch_id,
+          phone: payload.phone || undefined,
+          password: payload.password || undefined,
+        },
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-teachers"] });
       setEditing(null);
       setCreating(false);
-      toast.success("Teacher saved");
+      toast.success("Teacher account saved successfully");
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to save teacher"),
   });
 
   const del = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("teachers").delete().eq("id", id);
-      if (error) throw error;
+      await adminDeleteTeacher({ data: { id } });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-teachers"] });
       setConfirmDel(null);
-      toast.success("Deleted");
+      toast.success("Teacher deleted");
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to delete teacher"),
   });
 
+  function generatePassword() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
+    let pass = "";
+    for (let i = 0; i < 10; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+  }
+
   function openCreate() {
-    setForm({ ...emptyForm, branch_id: branches.data?.[0]?.id ?? "" });
+    setForm({
+      ...emptyForm,
+      branch_id: branches.data?.[0]?.id ?? "",
+      password: generatePassword(),
+    });
     setCreating(true);
   }
   function openEdit(t: Teacher) {
@@ -161,6 +172,7 @@ function TeachersPage() {
       email: t.email ?? "",
       phone: t.phone ?? "",
       branch_id: t.branch_id ?? "",
+      password: "",
     });
     setEditing(t);
   }
@@ -200,6 +212,7 @@ function TeachersPage() {
               <th className="px-6 py-3">Teacher</th>
               <th className="px-6 py-3">Branch</th>
               <th className="px-6 py-3">Email</th>
+              <th className="px-6 py-3">Login Account</th>
               <th className="px-6 py-3">Phone</th>
               <th className="px-6 py-3" />
             </tr>
@@ -220,6 +233,21 @@ function TeachersPage() {
                 </td>
                 <td className="whitespace-nowrap px-6 py-3.5 text-muted-foreground">{t.branches?.code ?? "—"}</td>
                 <td className="whitespace-nowrap px-6 py-3.5 text-muted-foreground">{t.email ?? "—"}</td>
+                <td className="whitespace-nowrap px-6 py-3.5">
+                  {t.user_id ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Active Login
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => openEdit(t)}
+                      className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition"
+                      title="Click to set password and enable login"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Set Password
+                    </button>
+                  )}
+                </td>
                 <td className="whitespace-nowrap px-6 py-3.5 text-muted-foreground">{t.phone ?? "—"}</td>
                 <td className="whitespace-nowrap px-6 py-3.5 text-right">
                   <Link
@@ -239,7 +267,7 @@ function TeachersPage() {
               </tr>
             ))}
             {filtered.length === 0 && !teachers.isLoading && (
-              <tr><td colSpan={5} className="px-6 py-16 text-center text-sm text-muted-foreground">No teachers.</td></tr>
+              <tr><td colSpan={6} className="px-6 py-16 text-center text-sm text-muted-foreground">No teachers.</td></tr>
             )}
           </tbody>
         </table>
@@ -249,10 +277,17 @@ function TeachersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editing ? "Edit teacher" : "Add teacher"}</DialogTitle>
-            <DialogDescription>Assign the branch they will monitor.</DialogDescription>
+            <DialogDescription>Assign the branch they oversee and configure their login credentials.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Full name *"><input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className={inputCls} /></Field>
+            <Field label="Full name *">
+              <input
+                value={form.full_name}
+                onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                className={inputCls}
+                placeholder="e.g. Dr. Jane Doe"
+              />
+            </Field>
             <Field label="Branch / Department *">
               <select value={form.branch_id} onChange={(e) => setForm({ ...form, branch_id: e.target.value })} className={inputCls}>
                 <option value="">— select branch —</option>
@@ -261,20 +296,61 @@ function TeachersPage() {
                 ))}
               </select>
             </Field>
-            <Field label="Email"><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} /></Field>
-            <Field label="Phone"><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputCls} /></Field>
+            <Field label="Email *">
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className={inputCls}
+                placeholder="teacher@institute.edu"
+              />
+            </Field>
+            <Field label="Phone">
+              <input
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                className={inputCls}
+                placeholder="+91 98765 43210"
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                  {editing ? "Login Password (optional)" : "Login Password *"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, password: generatePassword() })}
+                  className="mb-1 text-xs text-primary hover:underline font-medium"
+                >
+                  Generate random
+                </button>
+              </div>
+              <input
+                type="text"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className={inputCls}
+                placeholder={editing ? "Leave blank to keep existing password" : "At least 6 characters"}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {editing
+                  ? "Enter a new password only if you wish to reset this teacher's login credentials."
+                  : "The teacher will use this email and password to log in at /login."}
+              </p>
+            </div>
           </div>
           <p className="px-1 text-[11px] text-muted-foreground">
-            Branch assignment determines which students and detection records this teacher can view. Changing it takes effect immediately.
+            Branch assignment determines which students and detection records this teacher can view and approve.
           </p>
           <DialogFooter>
             <button onClick={() => { setEditing(null); setCreating(false); }} className="btn-ghost text-sm">Cancel</button>
             <button
-              disabled={upsert.isPending || !form.full_name || !form.branch_id}
+              disabled={upsert.isPending || !form.full_name || !form.branch_id || !form.email || (!editing && (!form.password || form.password.length < 6))}
               onClick={() => upsert.mutate(editing ? { ...form, id: editing.id } : form)}
               className="btn-primary text-sm disabled:opacity-50"
             >
-              {upsert.isPending ? "Saving…" : "Save"}
+              {upsert.isPending ? "Saving…" : "Save teacher"}
             </button>
           </DialogFooter>
         </DialogContent>

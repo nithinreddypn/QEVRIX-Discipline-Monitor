@@ -30,6 +30,14 @@ export function getFriendlyErrorMessage(error: any, fallback = "An unexpected er
   if (message.includes("Invalid login credentials")) {
     return "Incorrect email or password. Please verify your details and try again.";
   }
+  if (
+    message.includes("Failed to fetch") ||
+    message.includes("ERR_INTERNET_DISCONNECTED") ||
+    message.includes("NetworkError") ||
+    message.includes("AuthRetryableFetchError")
+  ) {
+    return "Unable to connect to the authentication server. Please check your internet connection and try again.";
+  }
   if (message.includes("Email not confirmed")) {
     return "Your email address has not been verified yet. Please check your inbox for the verification link.";
   }
